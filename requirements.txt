@@ -1,0 +1,7 @@
+gym
+opencv-python
+plotly
+torch
+tqdm
+sympy
+anytree
