@@ -16,7 +16,7 @@ class ExperienceReplay:
         )
         self.actions = np.empty((size, action_size), dtype=np.float32)
         self.rewards = np.empty((size,), dtype=np.float32)
-        self.violations = np.empty((size,), dtype=np.long)
+        self.violations = np.empty((size,), dtype=np.int_)
         self.nonterminals = np.empty((size, 1), dtype=np.float32)
         self.idx = 0
         self.full = False  # Tracks if memory has been filled/all slots are valid
