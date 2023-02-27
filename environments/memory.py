@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from env.env import postprocess_observation, preprocess_observation_
+from env.utils import postprocess_observation, preprocess_observation
 
 
 class ExperienceReplay:
@@ -58,7 +58,7 @@ class ExperienceReplay:
         vec_idxs = idxs.transpose().reshape(-1)  # Unroll indices
         observations = torch.as_tensor(self.observations[vec_idxs].astype(np.float32))
         if not self.symbolic_env:
-            preprocess_observation_(
+            preprocess_observation(
                 observations, self.bit_depth
             )  # Undo discretisation for visual observations
         return (
