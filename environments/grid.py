@@ -4,7 +4,7 @@ import random
 from .utils import images_to_observation
 
 class GridEnv():
-    def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth):
+    def __init__(self, env, seed, max_episode_length, action_repeat, bit_depth):
         from gridworld.gridworld import GridWorld, GridWorldAction
 
         self.max_episode_length = max_episode_length

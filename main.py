@@ -8,8 +8,8 @@ from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
-from env.env import CONTROL_SUITE_ENVS, Env, GYM_ENVS, MINIGRID_ENVS ,EnvBatcher
-from env.memory import ExperienceReplay
+from environments.env import Env
+from environments.memory import ExperienceReplay
 from agent.models import bottle, Encoder, ObservationModel, RewardModel, TransitionModel, ValueModel, ActorModel, ViolationModel
 from agent.planner import MPCPlanner
 from shields.bps import BoundedPrescienceShield, ShieldBatcher
@@ -23,7 +23,7 @@ parser.add_argument('--algo', type=str, default='dreamer', help='planet or dream
 parser.add_argument('--id', type=str, default='default', help='Experiment ID')
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='Random seed')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--env', type=str, default='Pendulum-v0', choices=GYM_ENVS + CONTROL_SUITE_ENVS + MINIGRID_ENVS, help='Gym/Control Suite environment')
+parser.add_argument('--env', type=str, default='Pendulum-v0', choices=[], help='Gym/Control Suite environment')
 parser.add_argument('--symbolic-env', action='store_true', help='Symbolic features')
 parser.add_argument('--max-episode-length', type=int, default=1000, metavar='T', help='Max episode length')
 parser.add_argument('--experience-size', type=int, default=1000000, metavar='D', help='Experience replay size')  # Original implementation has an unlimited buffer size, but 1 million is the max experience collected anyway
@@ -97,12 +97,12 @@ summary_name = results_dir + "/{}_{}_log"
 writer = SummaryWriter(summary_name.format(args.env, args.id))
 
 # Initialise training environment and experience replay memory
-env = Env(args.env, args.symbolic_env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth)
+env = Env(args.env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth)
 if args.experience_replay != '' and os.path.exists(args.experience_replay):
   D = torch.load(args.experience_replay)
   metrics['steps'], metrics['episodes'] = [D.steps] * D.episodes, list(range(1, D.episodes + 1))
 elif not args.test:
-  D = ExperienceReplay(args.experience_size, args.symbolic_env, env.observation_size, env.action_size, args.bit_depth, args.device)
+  D = ExperienceReplay(args.experience_size, env.observation_size, env.action_size, args.bit_depth, args.device)
   # Initialise dataset D with S random seed episodes
   for s in range(1, args.seed_episodes + 1):
     violation_count = 0
@@ -123,10 +123,10 @@ elif not args.test:
 
 # Initialise model parameters randomly
 transition_model = TransitionModel(args.belief_size, args.state_size, env.action_size, args.hidden_size, args.embedding_size, args.dense_activation_function).to(device=args.device)
-observation_model = ObservationModel(args.symbolic_env, env.observation_size, args.belief_size, args.state_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
+observation_model = ObservationModel(env.observation_size, args.belief_size, args.state_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
 reward_model = RewardModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
 violation_model = ViolationModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
-encoder = Encoder(args.symbolic_env, env.observation_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
+encoder = Encoder(env.observation_size, args.embedding_size, args.cnn_activation_function).to(device=args.device)
 actor_model = ActorModel(args.belief_size, args.state_size, args.hidden_size, env.action_size, args.dense_activation_function).to(device=args.device)
 value_model = ValueModel(args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function).to(device=args.device)
 param_list = list(transition_model.parameters()) + list(observation_model.parameters()) + list(reward_model.parameters()) + list(violation_model.parameters()) + list(encoder.parameters())
@@ -246,9 +246,9 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     # Calculate observation likelihood, reward likelihood and KL losses (for t = 0 only for latent overshooting); sum over final dims, average over batch and time (original implementation, though paper seems to miss 1/T scaling?)
     if args.worldmodel_LogProbLoss:
       observation_dist = Normal(bottle(observation_model, (beliefs, posterior_states)), 1)
-      observation_loss = -observation_dist.log_prob(observations[1:]).sum(dim=2 if args.symbolic_env else (2, 3, 4)).mean(dim=(0, 1))
+      observation_loss = -observation_dist.log_prob(observations[1:]).sum(dim=2).mean(dim=(0, 1))
     else: 
-      observation_loss = F.mse_loss(bottle(observation_model, (beliefs, posterior_states)), observations[1:], reduction='none').sum(dim=2 if args.symbolic_env else (2, 3, 4)).mean(dim=(0, 1))
+      observation_loss = F.mse_loss(bottle(observation_model, (beliefs, posterior_states)), observations[1:], reduction='none').sum(dim=2).mean(dim=(0, 1))
     if args.worldmodel_LogProbLoss:
       reward_dist = Normal(bottle(reward_model, (beliefs, posterior_states)),1)
       reward_loss = -reward_dist.log_prob(rewards[:-1]).mean(dim=(0, 1))
@@ -394,7 +394,7 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     actor_model.eval()
     value_model.eval()
     # Initialise parallelised test environments
-    test_envs = EnvBatcher(Env, (args.env, args.symbolic_env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth), {}, args.test_episodes)
+    test_envs = EnvBatcher(Env, (args.env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth), {}, args.test_episodes)
     shield = ShieldBatcher(BoundedPrescienceShield, test_envs.envs, transition_model, violation_model, violation_threshold=args.violation_threshold, paths_to_sample=args.paths_to_sample)
     with torch.no_grad():
       observation, total_rewards, video_frames = test_envs.reset(), np.zeros((args.test_episodes, )), []
@@ -403,8 +403,6 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
       pbar = tqdm(range(args.max_episode_length // args.action_repeat))
       for t in pbar:
         belief, posterior_state, action, next_observation, reward, violation, done = update_belief_and_act(args, test_envs, planner, transition_model, violation_model, observation_model, encoder, belief, posterior_state, action.cuda(), observation.to(device=args.device), violation, shield)
-        if not args.symbolic_env:  # Collect real vs. predicted frames for video
-          video_frames.append(make_grid(torch.cat([observation, observation_model(belief, posterior_state).cpu()], dim=3) + 0.5, nrow=5).numpy())  # Decentre
         observation = next_observation
         if done.sum().item() == args.test_episodes:
           pbar.close()
@@ -415,10 +413,6 @@ for episode in tqdm(range(metrics['episodes'][-1] + 1, args.episodes + 1), total
     metrics['test_rewards'].append(total_rewards.tolist())
     lineplot(metrics['test_episodes'], metrics['test_rewards'], 'test_rewards', results_dir)
     lineplot(np.asarray(metrics['steps'])[np.asarray(metrics['test_episodes']) - 1], metrics['test_rewards'], 'test_rewards_steps', results_dir, xaxis='step')
-    if not args.symbolic_env:
-      episode_str = str(episode).zfill(len(str(args.episodes)))
-      write_video(video_frames, 'test_episode_%s' % episode_str, results_dir)  # Lossy compression
-      save_image(torch.as_tensor(video_frames[-1]), os.path.join(results_dir, 'test_episode_%s.png' % episode_str))
     torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
 
     # Set models to train mode

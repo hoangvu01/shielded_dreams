@@ -1,18 +1,17 @@
 import numpy as np
 import torch
-from env.utils import postprocess_observation, preprocess_observation
+from environments.utils import postprocess_observation, preprocess_observation
 
 
 class ExperienceReplay:
     def __init__(
-        self, size, symbolic_env, observation_size, action_size, bit_depth, device
+        self, size, observation_size, action_size, bit_depth, device
     ):
         self.device = device
-        self.symbolic_env = symbolic_env
         self.size = size
         self.observations = np.empty(
-            (size, observation_size) if symbolic_env else (size, 3, 64, 64),
-            dtype=np.float32 if symbolic_env else np.uint8,
+            (size, *observation_size),
+            dtype=np.float32,
         )
         self.actions = np.empty((size, action_size), dtype=np.float32)
         self.rewards = np.empty((size,), dtype=np.float32)
@@ -28,12 +27,7 @@ class ExperienceReplay:
         self.violation_count = 0
 
     def append(self, observation, action, reward, violation, done):
-        if self.symbolic_env:
-            self.observations[self.idx] = observation.numpy()
-        else:
-            self.observations[self.idx] = postprocess_observation(
-                observation.numpy(), self.bit_depth
-            )  # Decentre and discretise visual observations (to save memory)
+        self.observations[self.idx] = observation.numpy()
         self.actions[self.idx] = action.numpy()
         self.rewards[self.idx] = reward
         self.violations[self.idx] = violation
@@ -57,10 +51,6 @@ class ExperienceReplay:
     def _retrieve_batch(self, idxs, n, L):
         vec_idxs = idxs.transpose().reshape(-1)  # Unroll indices
         observations = torch.as_tensor(self.observations[vec_idxs].astype(np.float32))
-        if not self.symbolic_env:
-            preprocess_observation(
-                observations, self.bit_depth
-            )  # Undo discretisation for visual observations
         return (
             observations.reshape(L, n, *observations.shape[1:]),
             self.actions[vec_idxs].reshape(L, n, -1),

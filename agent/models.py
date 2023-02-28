@@ -121,11 +121,8 @@ class VisualObservationModel(jit.ScriptModule):
     return observation
 
 
-def ObservationModel(symbolic, observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
-  if symbolic:
+def ObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
     return SymbolicObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function)
-  else:
-    return VisualObservationModel(belief_size, state_size, embedding_size, activation_function)
 
 
 class RewardModel(jit.ScriptModule):
@@ -313,12 +310,8 @@ class VisualEncoder(jit.ScriptModule):
     return hidden
 
 
-def Encoder(symbolic, observation_size, embedding_size, activation_function='relu'):
-  if symbolic:
+def Encoder(observation_size, embedding_size, activation_function='relu'):
     return SymbolicEncoder(observation_size, embedding_size, activation_function)
-  else:
-    return VisualEncoder(embedding_size, activation_function)
-
 
 # "atanh", "TanhBijector" and "SampleDist" are from the following repo
 # https://github.com/juliusfrost/dreamer-pytorch

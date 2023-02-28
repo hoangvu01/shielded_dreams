@@ -4,10 +4,6 @@ import torch
 import random
 
 from .grid import GridEnv
-from .gym import GymEnv
-from .driving import DrivingEnv
-from .control_suite import ControlSuiteEnv
-from .minigrid import MiniGridEnv
 
 GYM_ENVS = ['Pendulum-v0', 'MountainCarContinuous-v0', 'Ant-v2', 'HalfCheetah-v2', 'Hopper-v2', 'Humanoid-v2',
             'HumanoidStandup-v2', 'InvertedDoublePendulum-v2', 'InvertedPendulum-v2', 'Reacher-v2', 'Swimmer-v2', 'Walker2d-v2']
@@ -18,13 +14,8 @@ CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2,
                                 'cheetah': 4, 'ball_in_cup': 6, 'walker': 2, 'humanoid': 2, 'fish': 2, 'acrobot': 4}
 
 
-def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth):
-    if env in GYM_ENVS:
-        return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
-    elif env in CONTROL_SUITE_ENVS:
-        return ControlSuiteEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
-    elif env in MINIGRID_ENVS:
-        return MiniGridEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
+def Env(env, seed, max_episode_length, action_repeat, bit_depth):
+    return GridEnv(env, seed, max_episode_length, action_repeat, bit_depth)
 
 # Wrapper for batching environments together
 class EnvBatcher():
