@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-from environments.utils import postprocess_observation, preprocess_observation
-
 
 class ExperienceReplay:
     def __init__(
@@ -10,7 +8,7 @@ class ExperienceReplay:
         self.device = device
         self.size = size
         self.observations = np.empty(
-            (size, *observation_size),
+            (size, observation_size),
             dtype=np.float32,
         )
         self.actions = np.empty((size, action_size), dtype=np.float32)

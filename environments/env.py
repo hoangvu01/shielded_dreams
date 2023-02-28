@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import random
 
+from environments.minigrids.lavagap.lavagap import LavaGapMinigrid
+
 from .grid import GridEnv
 
 GYM_ENVS = ['Pendulum-v0', 'MountainCarContinuous-v0', 'Ant-v2', 'HalfCheetah-v2', 'Hopper-v2', 'Humanoid-v2',
@@ -15,7 +17,8 @@ CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2,
 
 
 def Env(env, seed, max_episode_length, action_repeat, bit_depth):
-    return GridEnv(env, seed, max_episode_length, action_repeat, bit_depth)
+    # return GridEnv(env, seed, max_episode_length, action_repeat, bit_depth)
+    return LavaGapMinigrid(seed, max_episode_length, action_repeat, bit_depth)
 
 # Wrapper for batching environments together
 class EnvBatcher():
