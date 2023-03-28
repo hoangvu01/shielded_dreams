@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 
-
 class LavaGapMinigrid:
     def __init__(
         self,
