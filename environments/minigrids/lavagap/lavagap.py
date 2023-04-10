@@ -83,7 +83,7 @@ class LavaGapMinigrid:
 
             if isinstance(fwd_cell, Goal):
                 done = True
-                reward = env_reward
+                reward = 1
 
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
@@ -103,7 +103,8 @@ class LavaGapMinigrid:
 
     @property
     def action_size(self):
-        return self._env.action_space.n.item()
+        # return self._env.action_space.n.item()
+        return 3
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):

@@ -288,7 +288,7 @@ def update_belief_and_act(
         encoder,
     )
 
-    # action = shield_action
+    action = shield_action
     next_observation, reward, violation, done = env.step(
         action.cpu() if isinstance(env, EnvBatcher) else action[0].cpu()
     )  # action[0].cpu())  # Perform environment step (action repeats handled internally)
@@ -434,7 +434,6 @@ for episode in tqdm(
                 rewards[:-1],
                 reduction="none",
             ).mean(dim=(0, 1))
-            # if episode > 50:
             violation_loss = F.cross_entropy(
                 bottle(
                     violation_model,
@@ -444,11 +443,8 @@ for episode in tqdm(
                     ),
                 ).reshape(len(violations[:-1]) * len(violations), 2),
                 violations[:-1].reshape(len(violations[:-1]) * len(violations)),
-                # weight=torch.tensor([1.,3.]).to(args.device),
                 reduction="none",
             ).mean()
-            # else:
-            # violation_loss = torch.zeros([1]).to(args.device)
         # transition loss
         kl_loss = 0.8 * kl_divergence(
             Normal(posterior_means.detach(), posterior_std_devs.detach()),
