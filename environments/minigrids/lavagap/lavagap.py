@@ -1,11 +1,12 @@
 import random
-from enum import IntEnum
 
 import gymnasium
 import numpy as np
 import torch
 import torch.nn.functional as F
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
+from minigrid.core.world_object import Lava, Wall, Goal
+
 
 class LavaGapMinigrid:
     def __init__(
@@ -14,14 +15,15 @@ class LavaGapMinigrid:
         max_episode_length=100,
         action_repeat=1,
         bit_depth=1,
-        render_mode="rgb_array",
-        screen_size=620,
+        render_mode="human",
+        screen_size=300,
     ):
         self.max_episode_length = max_episode_length
 
         # Environment config
         _env = gymnasium.make(
             "MiniGrid-LavaGapS5-v0",
+            obstacle_type=Lava,
             render_mode=render_mode,
             max_episode_steps=max_episode_length,
             screen_size=screen_size,
@@ -31,10 +33,14 @@ class LavaGapMinigrid:
         self._env_full = FullyObsWrapper(_env)  # Fully observable grid
 
         self._t = 0
+        self.wall_hits = 0
+        self.lava_hits = 0
 
     def reset(self):
         self._env.reset()
         self._t = 0
+        self.wall_hits = 0
+        self.lava_hits = 0
 
         obs, info = self._env.reset()
         partial_obs = self._env_partial.observation(obs)
@@ -43,24 +49,47 @@ class LavaGapMinigrid:
         return partial_obs
 
     def step(self, action):
-        prev_grid = self._env_full.observation({})["image"][:, :, 0]
-
         action = action.argmax()
 
-        obs, reward, terminated, truncated, info = self._env.step(action)
+        # Next cell / position
+        cur_cell = self._env.grid.get(*self._env.agent_pos)
+        fwd_cell = self._env.grid.get(*self._env.front_pos)
+
+        obs, env_reward, terminated, truncated, info = self._env.step(action)
         partial_obs = self._env_partial.observation(obs)
-        partial_obs = torch.tensor(partial_obs).to(torch.float32).view(1, -1)
 
-        done = terminated or truncated
-
-        x, y = self._env.agent_pos
-        cur_cell = prev_grid[x, y].item()
+        x, y = self._env_partial.agent_pos
+        rx, ry = self._env.relative_coords(x, y)
 
         violation = 0
-        if cur_cell == 9 or cur_cell == 2:
-            violation = 1
 
-        return partial_obs, reward, violation, done
+        done = False
+        reward = -0.01
+
+        if action == 2:
+            hit_wall = isinstance(fwd_cell, Wall)
+            hit_lava = isinstance(fwd_cell, Lava)
+
+            if hit_lava:
+                self.lava_hits += 1
+                violation = 1
+            elif hit_wall:
+                self.wall_hits += 1
+                violation = 1
+
+            # Replaces current position with object
+            if fwd_cell is not None:
+                partial_obs[rx, ry] = fwd_cell.encode()[0]
+
+            if isinstance(fwd_cell, Goal):
+                done = True
+                reward = env_reward
+
+        elif cur_cell is not None:
+            partial_obs[rx, ry] = cur_cell.encode()[0]
+
+        flattened_obs = torch.tensor(partial_obs).to(torch.float32).view(1, -1)
+        return flattened_obs, reward, violation, done
 
     def render(self):
         self._env.render()
@@ -91,7 +120,10 @@ if __name__ == "__main__":
             cmd = input("Move? (0, 1, 2) ")
             move = torch.zeros(e.observation_size)
             move[int(cmd)] = 1
-            e.step(move)
+            state, reward, violation, done = e.step(move)
+            print(reward, violation)
             e.render()
+            if done:
+                e.reset()
         except EOFError:
             break

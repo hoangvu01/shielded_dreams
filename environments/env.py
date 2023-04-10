@@ -16,9 +16,9 @@ CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2,
                                 'cheetah': 4, 'ball_in_cup': 6, 'walker': 2, 'humanoid': 2, 'fish': 2, 'acrobot': 4}
 
 
-def Env(env, seed, max_episode_length, action_repeat, bit_depth):
-    # return GridEnv(env, seed, max_episode_length, action_repeat, bit_depth)
-    return LavaGapMinigrid(seed, max_episode_length, action_repeat, bit_depth)
+def Env(env, seed, max_episode_length, action_repeat, bit_depth, render=False):
+    render_mode = 'human' if render else None
+    return LavaGapMinigrid(seed, max_episode_length, action_repeat, bit_depth, render_mode=render_mode)
 
 # Wrapper for batching environments together
 class EnvBatcher():

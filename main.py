@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import numpy as np
 import yaml
 from pathlib import Path
@@ -40,7 +41,7 @@ from torch.utils.tensorboard import SummaryWriter
 # Hyper parameters
 args = parser.parse_args()
 
-with open(args.path, 'r') as fp:
+with open(args.path, "r") as fp:
     defaults = yaml.safe_load(fp)
     parser.set_defaults(**defaults)
     args = parser.parse_args()
@@ -86,8 +87,14 @@ writer = SummaryWriter(summary_name.format(args.env, args.id))
 
 # Initialise training environment and experience replay memory
 env = Env(
-    args.env, args.seed, args.max_episode_length, args.action_repeat, args.bit_depth
+    args.env,
+    args.seed,
+    args.max_episode_length,
+    args.action_repeat,
+    args.bit_depth,
+    args.render,
 )
+
 if args.experience_replay != "" and os.path.exists(args.experience_replay):
     D = torch.load(args.experience_replay)
     metrics["steps"], metrics["episodes"] = [D.steps] * D.episodes, list(
@@ -109,7 +116,6 @@ elif not args.test:
             action = env.sample_random_action()
             next_observation, reward, violation, done = env.step(action)
             if violation:
-                reward -= 40
                 violation_count += 1
             D.append(observation, action, reward, violation, done)
             observation = next_observation
@@ -237,7 +243,6 @@ def update_belief_and_act(
     explore=False,
 ):
     # Infer belief over current state q(s_t|o≤t,a<t) from the history
-    # print("action size: ",action.size()) torch.Size([1, 6])
     belief, _, _, _, posterior_state, _, _ = transition_model(
         posterior_state,
         action.unsqueeze(dim=0),
@@ -248,13 +253,13 @@ def update_belief_and_act(
         bottle(violation_model, (belief, posterior_state)).squeeze()
     )
 
-    if not isinstance(violation, torch.Tensor):
-        if violation == 1 and imagd_violation > 0.8:
-            print("correctly pred violation")
-        elif violation == 1 and imagd_violation < 0.8:
-            print("missed violation")
-        elif violation == 0 and imagd_violation > 0.8:
-            print("incorrectly pred violation")
+    # if not isinstance(violation, torch.Tensor):
+    #     if violation == 1 and imagd_violation > 0.8:
+    #         print("correctly pred violation")
+    #     elif violation == 1 and imagd_violation < 0.8:
+    #         print("missed violation")
+    #     elif violation == 0 and imagd_violation > 0.8:
+    #         print("incorrectly pred violation")
 
     belief, posterior_state = belief.squeeze(dim=0), posterior_state.squeeze(
         dim=0
@@ -273,7 +278,6 @@ def update_belief_and_act(
         ).to(
             args.device
         )  # Add gaussian exploration noise on top of the sampled action
-        # action = action + args.action_noise * torch.randn_like(action)  # Add exploration noise ε ~ p(ε) to the action
     shield_action, shield_interfered = shield.step(
         belief,
         posterior_state,
@@ -283,15 +287,11 @@ def update_belief_and_act(
         observation,
         encoder,
     )
-    # if episode > 60 or (episode > 10 and episode < 40 and episode % 2 == 0) or (episode >= 40 and episode % 2 == 0 and episode % 3 == 0):
-    if episode > 20 or (episode > 10 and episode % 2 == 0):
-        action = shield_action
-        if shield_interfered:
-            print("interfered")
+
+    # action = shield_action
     next_observation, reward, violation, done = env.step(
         action.cpu() if isinstance(env, EnvBatcher) else action[0].cpu()
     )  # action[0].cpu())  # Perform environment step (action repeats handled internally)
-    reward -= 40 if shield_interfered or violation else 0
 
     return belief, posterior_state, action, next_observation, reward, violation, done
 
@@ -619,9 +619,9 @@ for episode in tqdm(
         nn.utils.clip_grad_norm_(
             value_model.parameters(), args.grad_clip_norm, norm_type=2
         )
-        # value_optimizer.step()
+        value_optimizer.step()
 
-        # # Store (0) observation loss (1) reward loss (2) KL loss (3) actor loss (4) value loss (5) violation loss
+        # Store (0) observation  loss (1) reward loss (2) KL loss (3) actor loss (4) value loss (5) violation loss
         losses.append(
             [
                 observation_loss.item(),
@@ -697,7 +697,6 @@ for episode in tqdm(
         )
         pbar = tqdm(range(args.max_episode_length // args.action_repeat))
         for t in pbar:
-            # print("step",t)
             (
                 belief,
                 posterior_state,
@@ -732,6 +731,7 @@ for episode in tqdm(
             if done:
                 pbar.close()
                 break
+            pbar.set_postfix(violations=violations, total_reward=total_reward)
 
         # Update and plot train reward metrics
         metrics["steps"].append(t + metrics["steps"][-1])
@@ -775,6 +775,14 @@ for episode in tqdm(
             {},
             args.test_episodes,
         )
+        # test_envs = Env(
+        #     args.env,
+        #     args.seed,
+        #     args.max_episode_length,
+        #     args.action_repeat,
+        #     args.bit_depth,
+        # )
+
         shield = ShieldBatcher(
             BoundedPrescienceShield,
             test_envs.envs,
@@ -871,6 +879,10 @@ for episode in tqdm(
     writer.add_scalar("kl_loss", metrics["kl_loss"][0][-1], metrics["steps"][-1])
     writer.add_scalar("actor_loss", metrics["actor_loss"][0][-1], metrics["steps"][-1])
     writer.add_scalar("value_loss", metrics["value_loss"][0][-1], metrics["steps"][-1])
+    writer.add_scalar(
+        "violation_loss", metrics["violation_loss"][0][-1], metrics["steps"][-1]
+    )
+
     print(
         "episodes: {}, total_steps: {}, train_reward: {}, violations: {} ".format(
             metrics["episodes"][-1],

@@ -257,7 +257,7 @@ class ViolationModel(jit.ScriptModule):
     def forward(self, belief, state):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
-        # hidden = self.act_fn(self.fc2(hidden))
+        hidden = self.act_fn(self.fc2(hidden))
         # hidden = self.act_fn(self.fc3(hidden))
         violation = torch.softmax(self.act_fn(self.fc4(hidden)), dim=1).squeeze(dim=1)
         return violation
@@ -271,9 +271,12 @@ class ValueModel(jit.ScriptModule):
         self.act_fn = getattr(F, activation_function)
         self.fc1 = nn.Linear(belief_size + state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, hidden_size)
-        self.fc4 = nn.Linear(hidden_size, 1)
-        self.modules = [self.fc1, self.fc2, self.fc3, self.fc4]
+        self.fc4 = nn.Linear(hidden_size, hidden_size)
+        self.fc5 = nn.Linear(hidden_size, hidden_size)
+        self.fc6 = nn.Linear(hidden_size, 1)
+        self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
     def forward(self, belief, state):
@@ -281,7 +284,9 @@ class ValueModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
-        reward = self.fc4(hidden).squeeze(dim=1)
+        hidden = self.act_fn(self.fc4(hidden))
+        hidden = self.act_fn(self.fc5(hidden))
+        reward = self.fc6(hidden).squeeze(dim=1)
         return reward
 
 
@@ -304,8 +309,18 @@ class ActorModel(jit.ScriptModule):
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
-        self.fc5 = nn.Linear(hidden_size, 2 * action_size)
-        self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5]
+        self.fc5 = nn.Linear(hidden_size, hidden_size)
+        self.fc6 = nn.Linear(hidden_size, hidden_size)
+        self.fc7 = nn.Linear(hidden_size, 2 * action_size)
+        self.modules = [
+            self.fc1,
+            self.fc2,
+            self.fc3,
+            self.fc4,
+            self.fc5,
+            self.fc6,
+            self.fc7,
+        ]
 
         self._dist = dist
         self._min_std = min_std
@@ -320,7 +335,9 @@ class ActorModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
         hidden = self.act_fn(self.fc4(hidden))
-        action = self.fc5(hidden).squeeze(dim=1)
+        hidden = self.act_fn(self.fc5(hidden))
+        hidden = self.act_fn(self.fc6(hidden))
+        action = self.fc7(hidden).squeeze(dim=1)
 
         action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
         action_mean = self._mean_scale * torch.tanh(action_mean / self._mean_scale)
