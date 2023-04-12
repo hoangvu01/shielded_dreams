@@ -8,7 +8,7 @@ from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from minigrid.core.world_object import Lava, Wall, Goal
 
 
-class LavaGapMinigrid:
+class DistShiftMinigrid:
     def __init__(
         self,
         seed=0,

@@ -1,0 +1,1 @@
+from .lavagap import LavaGapMinigrid
