@@ -1,5 +1,5 @@
 algo: "dreamer"
-id: "experiment"
+id: "5x5"
 seed: 1
 disable_cuda: False
 env: "LavaGap"

@@ -22,7 +22,7 @@ class LavaGapMinigrid:
 
         # Environment config
         _env = gymnasium.make(
-            "MiniGrid-LavaGapS5-v0",
+            "MiniGrid-LavaGapS7-v0",
             obstacle_type=Lava,
             render_mode=render_mode,
             max_episode_steps=max_episode_length,

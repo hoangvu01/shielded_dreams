@@ -727,7 +727,6 @@ for episode in tqdm(
             if done:
                 pbar.close()
                 break
-            pbar.set_postfix(violations=violations, total_reward=total_reward)
 
         # Update and plot train reward metrics
         metrics["steps"].append(t + metrics["steps"][-1])

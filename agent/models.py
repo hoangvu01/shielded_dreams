@@ -275,11 +275,10 @@ class ValueModel(jit.ScriptModule):
         self.act_fn = getattr(F, activation_function)
         self.fc1 = nn.Linear(belief_size + state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
-        self.fc5 = nn.Linear(hidden_size, hidden_size)
-        self.fc6 = nn.Linear(hidden_size, 1)
+        self.fc5 = nn.Linear(hidden_size, hidden_size // 2)
+        self.fc6 = nn.Linear(hidden_size // 2, 1)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
