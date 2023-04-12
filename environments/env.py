@@ -31,7 +31,9 @@ class EnvBatcher:
 
     # Resets every environment and returns observation
     def reset(self):
-        observations = [env.reset() for env in self.envs]
+        observations = [
+            torch.tensor(env.reset()[0]).to(torch.float32) for env in self.envs
+        ]
         self.dones = [False] * self.n
         return torch.cat(observations)
 
@@ -39,9 +41,12 @@ class EnvBatcher:
     def step(self, actions):
         # Done mask to blank out observations and zero rewards for previously terminated environments
         done_mask = torch.nonzero(torch.tensor(self.dones))[:, 0]
-        observations, rewards, violations, dones = zip(
+
+        observations, rewards, dones, _, infos = zip(
             *[env.step(action) for env, action in zip(self.envs, actions)]
         )
+
+        violations = [info["violation"] for info in infos]
         # Env should remain terminated if previously terminated
         dones = [d or prev_d for d, prev_d in zip(dones, self.dones)]
         self.dones = dones

@@ -40,7 +40,7 @@ candidates: 1000
 top_candidates: 100
 
 test: False
-test_interval: 50
+test_interval: 20
 test_episodes: 5
 
 checkpoint_interval: 50
