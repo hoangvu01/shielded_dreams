@@ -6,7 +6,9 @@ MINIGRID_ENVS = [
     "LavaGapS7-Relaxed",
     "LavaGapS7",
     "DistShift1",
+    "DistShift1-Relaxed",
     "DistShift2",
+    "DistShift2-Relaxed",
 ]
 
 gymnasium.register(
