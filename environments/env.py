@@ -46,6 +46,7 @@ class EnvBatcher:
             *[env.step(action) for env, action in zip(self.envs, actions)]
         )
 
+        observations = [torch.tensor(o).to(torch.float32) for o in observations]
         violations = [info["violation"] for info in infos]
         # Env should remain terminated if previously terminated
         dones = [d or prev_d for d, prev_d in zip(dones, self.dones)]

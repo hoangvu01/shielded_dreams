@@ -386,7 +386,7 @@ for episode in tqdm(
         + violation_model.modules
     )
 
-    print("training loop")
+    print("\ntraining loop\n")
     for s in tqdm(range(args.collect_interval)):
         # Draw sequence chunks {(o_t, a_t, r_t+1, terminal_t+1)} ~ D uniformly at random from the dataset (including terminal flags)
         observations, actions, rewards, violations, nonterminals = D.sample(
@@ -682,7 +682,7 @@ for episode in tqdm(
     )
 
     # Data collection
-    print("Data collection")
+    print("\nData collection\n")
     shield = BoundedPrescienceShield(
         transition_model,
         violation_model,
@@ -756,7 +756,7 @@ for episode in tqdm(
         )
 
     # Test model
-    print("Test model")
+    print("\nTest model\n")
     if episode % args.test_interval == 0:
         # Set models to eval mode
         transition_model.eval()

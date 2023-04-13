@@ -5,52 +5,68 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
-from minigrid.core.world_object import Lava, Wall, Goal
+from minigrid.core.world_object import Lava, Goal, Wall
 
 
-class DistShiftMinigrid:
+class DistShiftMinigrid(gymnasium.Env):
+    metadata = {"render_modes": ["human"]}
+
     def __init__(
         self,
-        seed=0,
-        max_episode_length=100,
+        max_episode_steps=100,
         action_repeat=1,
         bit_depth=1,
         render_mode="human",
         screen_size=300,
+        version=1,
+        lava_death=False,
     ):
-        self.max_episode_length = max_episode_length
+        super().__init__()
 
         # Environment config
         _env = gymnasium.make(
-            "MiniGrid-LavaGapS7-v0",
-            obstacle_type=Lava,
+            f"MiniGrid-DistShift{version}-v0",
             render_mode=render_mode,
-            max_episode_steps=max_episode_length,
+            max_episode_steps=max_episode_steps,
             screen_size=screen_size,
         )
+
+        self.action_space = gymnasium.spaces.Discrete(3)
+        self.observation_space = gymnasium.spaces.Dict(
+            {
+                "direction": _env.observation_space["direction"],
+                "mission": _env.observation_space["mission"],
+                "image": gymnasium.spaces.Box(
+                    low=0,
+                    high=255,
+                    shape=(1, np.prod(_env.observation_space["image"].shape).item()),
+                    dtype=np.uint8,
+                ),
+            }
+        )
+
         self._env = _env
         self._env_partial = ImgObsWrapper(_env)  # Without 'mission' field
         self._env_full = FullyObsWrapper(_env)  # Fully observable grid
 
+        self._lava_death = lava_death
+
+        self._t = 0
+        self.wall_hits = 0
+        self.lava_hits = 0
+        self.max_episode_steps = max_episode_steps
+
+    def reset(self, seed=None, options=None):
         self._t = 0
         self.wall_hits = 0
         self.lava_hits = 0
 
-    def reset(self):
-        self._env.reset()
-        self._t = 0
-        self.wall_hits = 0
-        self.lava_hits = 0
-
-        obs, info = self._env.reset()
-        partial_obs = self._env_partial.observation(obs)
-        partial_obs = torch.tensor(partial_obs).to(torch.float32).view(1, -1)
-
-        return partial_obs
+        obs, info = self._env.reset(seed=seed, options=options)
+        partial_obs = self._env_partial.observation(obs).reshape(1, -1)
+        obs["image"] = partial_obs
+        return obs, info
 
     def step(self, action):
-        action = action.argmax()
-
         # Next cell / position
         cur_cell = self._env.grid.get(*self._env.agent_pos)
         fwd_cell = self._env.grid.get(*self._env.front_pos)
@@ -73,6 +89,10 @@ class DistShiftMinigrid:
             if hit_lava:
                 self.lava_hits += 1
                 violation = 1
+                reward = -0.25
+                if self._lava_death:
+                    done = True
+
             elif hit_wall:
                 self.wall_hits += 1
                 violation = 1
@@ -88,8 +108,11 @@ class DistShiftMinigrid:
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
 
-        flattened_obs = torch.tensor(partial_obs).to(torch.float32).view(1, -1)
-        return flattened_obs, reward, violation, done
+        flattened_obs = partial_obs.reshape(1, -1)
+        obs["image"] = flattened_obs
+        info["violation"] = violation
+
+        return obs, reward, done, False, info
 
     def render(self):
         self._env.render()
@@ -99,12 +122,11 @@ class DistShiftMinigrid:
 
     @property
     def observation_size(self):
-        return np.prod(self._env_partial.observation_space.shape).item()
+        return np.prod(self.observation_space["image"].shape).item()
 
     @property
     def action_size(self):
-        # return self._env.action_space.n.item()
-        return 3
+        return self.action_space.n.item()
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
@@ -113,16 +135,14 @@ class DistShiftMinigrid:
 
 
 if __name__ == "__main__":
-    e = LavaGapMinigrid(render_mode="human")
+    e = DistShiftMinigrid(render_mode="human", version=2)
     e.reset()
     e.render()
     while True:
         try:
-            cmd = input("Move? (0, 1, 2) ")
-            move = torch.zeros(e.observation_size)
-            move[int(cmd)] = 1
-            state, reward, violation, done = e.step(move)
-            print(reward, violation)
+            cmd = int(input("Move? (0, 1, 2) "))
+            state, reward, done, _, info = e.step(cmd)
+            print(reward, info["violation"])
             e.render()
             if done:
                 e.reset()
