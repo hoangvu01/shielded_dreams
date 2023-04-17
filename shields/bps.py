@@ -21,7 +21,7 @@ class BoundedPrescienceShield(Shield):
         self.violation_threshold = violation_threshold
         self.paths_to_sample = paths_to_sample
 
-    def step(self, belief, state, action, decoder, policy, observation, encoder):
+    def step(self, belief, state, action, policy):
         violation_occurred = False
         fallback_action_idxs = np.random.permutation(
             [i for i in range(0, len(action.squeeze()))]

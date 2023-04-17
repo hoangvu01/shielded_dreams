@@ -9,7 +9,7 @@ from minigrid.core.world_object import Lava, Goal, Wall
 
 
 class LavaGapMinigrid(gymnasium.Env):
-    metadata = {"render_modes": ["human"]}
+    metadata = {"render_modes": ["human"], "render_fps": 4}
 
     def __init__(
         self,

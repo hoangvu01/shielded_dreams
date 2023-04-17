@@ -242,7 +242,12 @@ class RewardModel(jit.ScriptModule):
 
 class ViolationModel(jit.ScriptModule):
     def __init__(
-        self, belief_size, state_size, hidden_size, activation_function="relu"
+        self,
+        belief_size,
+        state_size,
+        hidden_size,
+        # violation_size,
+        activation_function="relu",
     ):
         # [--belief-size: 200, --hidden-size: 200, --state-size: 30]
         super().__init__()
@@ -253,6 +258,7 @@ class ViolationModel(jit.ScriptModule):
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
         self.fc6 = nn.Linear(hidden_size, 2)
+        # self.fc6 = nn.Linear(hidden_size, violation_size)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
@@ -263,6 +269,7 @@ class ViolationModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc3(hidden))
         hidden = self.act_fn(self.fc4(hidden))
         hidden = self.act_fn(self.fc5(hidden))
+        # violation = torch.sigmoid(self.fc6(hidden))
         violation = torch.softmax(self.act_fn(self.fc6(hidden)), dim=1).squeeze(dim=1)
         return violation
 

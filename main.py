@@ -67,6 +67,7 @@ if torch.cuda.is_available() and not args.disable_cuda:
 else:
     print("using CPU")
     args.device = torch.device("cpu")
+
 metrics = {
     "steps": [],
     "episodes": [],
@@ -167,6 +168,7 @@ actor_model = ActorModel(
 value_model = ValueModel(
     args.belief_size, args.state_size, args.hidden_size, args.dense_activation_function
 ).to(device=args.device)
+
 param_list = (
     list(transition_model.parameters())
     + list(observation_model.parameters())
@@ -192,6 +194,7 @@ value_optimizer = optim.Adam(
     eps=args.adam_epsilon,
 )
 if args.models != "" and os.path.exists(args.models):
+    print(args.models)
     model_dicts = torch.load(args.models)
     transition_model.load_state_dict(model_dicts["transition_model"])
     observation_model.load_state_dict(model_dicts["observation_model"])
@@ -247,6 +250,8 @@ def update_belief_and_act(
     explore=False,
 ):
     # Infer belief over current state q(s_t|o≤t,a<t) from the history
+    print(belief[0, 0], posterior_state[0, 0], action, observation[0, 25])
+
     belief, _, _, _, posterior_state, _, _ = transition_model(
         posterior_state,
         action.unsqueeze(dim=0),
@@ -268,6 +273,8 @@ def update_belief_and_act(
     belief, posterior_state = belief.squeeze(dim=0), posterior_state.squeeze(
         dim=0
     )  # Remove time dimension from belief/state
+    print(belief[0, 0], posterior_state[0, 0])
+
     if args.algo == "dreamer":
         action = planner.get_action(belief, posterior_state, det=not (explore)).to(
             args.device
@@ -286,11 +293,13 @@ def update_belief_and_act(
         belief,
         posterior_state,
         action,
-        observation_model,
+        # observation_model,
         planner,
-        observation,
-        encoder,
+        # observation,
+        # encoder,
     )
+
+    print(belief[0, 0], posterior_state[0, 0])
 
     action = shield_action
     next_observation, reward, done, _, info = env.step(
@@ -321,7 +330,7 @@ if args.test:
         for _ in tqdm(range(args.test_episodes)):
             total_reward = 0
             total_violations = 0
-            observation, _ = env.reset()
+            observation, _ = env.reset(seed=0)
             observation = torch.tensor(observation).to(torch.float32)
             violation = torch.zeros((1, 1))
             belief, posterior_state, action = (
