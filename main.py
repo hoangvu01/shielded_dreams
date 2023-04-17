@@ -88,7 +88,6 @@ writer = SummaryWriter(summary_name.format(args.env, args.id))
 # Initialise training environment and experience replay memory
 env = Env(
     args.env,
-    args.seed,
     args.max_episode_length,
     args.action_repeat,
     args.bit_depth,
@@ -111,10 +110,15 @@ elif not args.test:
     # Initialise dataset D with S random seed episodes
     for s in range(1, args.seed_episodes + 1):
         violation_count = 0
-        observation, done, t = env.reset(), False, 0
+        observation, _ = env.reset()
+        observation = torch.tensor(observation).to(torch.float32)
+        done, t = False, 0
         while not done:
             action = env.sample_random_action()
-            next_observation, reward, violation, done = env.step(action)
+            next_observation, reward, done, _, info = env.step(action)
+            next_observation = torch.tensor(next_observation).to(torch.float32)
+
+            violation = info["violation"]
             if violation:
                 violation_count += 1
             D.append(observation, action, reward, violation, done)
@@ -289,9 +293,11 @@ def update_belief_and_act(
     )
 
     action = shield_action
-    next_observation, reward, violation, done = env.step(
+    next_observation, reward, done, _, info = env.step(
         action.cpu() if isinstance(env, EnvBatcher) else action[0].cpu()
     )  # action[0].cpu())  # Perform environment step (action repeats handled internally)
+    next_observation = torch.tensor(next_observation).to(torch.float32)
+    violation = info["violation"]
 
     return belief, posterior_state, action, next_observation, reward, violation, done
 
@@ -315,7 +321,8 @@ if args.test:
         for _ in tqdm(range(args.test_episodes)):
             total_reward = 0
             total_violations = 0
-            observation = env.reset()
+            observation, _ = env.reset()
+            observation = torch.tensor(observation).to(torch.float32)
             violation = torch.zeros((1, 1))
             belief, posterior_state, action = (
                 torch.zeros(1, args.belief_size, device=args.device),
@@ -379,7 +386,7 @@ for episode in tqdm(
         + violation_model.modules
     )
 
-    print("training loop")
+    print("\ntraining loop\n")
     for s in tqdm(range(args.collect_interval)):
         # Draw sequence chunks {(o_t, a_t, r_t+1, terminal_t+1)} ~ D uniformly at random from the dataset (including terminal flags)
         observations, actions, rewards, violations, nonterminals = D.sample(
@@ -675,7 +682,7 @@ for episode in tqdm(
     )
 
     # Data collection
-    print("Data collection")
+    print("\nData collection\n")
     shield = BoundedPrescienceShield(
         transition_model,
         violation_model,
@@ -684,7 +691,9 @@ for episode in tqdm(
     )
     violations = 0
     with torch.no_grad():
-        observation, total_reward = env.reset(), 0
+        observation, _ = env.reset()
+        observation = torch.tensor(observation).to(torch.float32)
+        total_reward = 0
         belief, posterior_state, action, violation = (
             torch.zeros(1, args.belief_size, device=args.device),
             torch.zeros(1, args.state_size, device=args.device),
@@ -747,7 +756,7 @@ for episode in tqdm(
         )
 
     # Test model
-    print("Test model")
+    print("\nTest model\n")
     if episode % args.test_interval == 0:
         # Set models to eval mode
         transition_model.eval()
@@ -762,7 +771,6 @@ for episode in tqdm(
             Env,
             (
                 args.env,
-                args.seed,
                 args.max_episode_length,
                 args.action_repeat,
                 args.bit_depth,
@@ -770,13 +778,6 @@ for episode in tqdm(
             {},
             args.test_episodes,
         )
-        # test_envs = Env(
-        #     args.env,
-        #     args.seed,
-        #     args.max_episode_length,
-        #     args.action_repeat,
-        #     args.bit_depth,
-        # )
 
         shield = ShieldBatcher(
             BoundedPrescienceShield,

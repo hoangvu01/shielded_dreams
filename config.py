@@ -3,6 +3,9 @@ from pathlib import Path
 
 import torch.nn.functional as F
 
+import safety_environments
+from safety_environments import MINIGRID_ENVS
+
 parser = argparse.ArgumentParser(description="PlaNet or Dreamer")
 parser.add_argument("--algo", type=str, help="planet or dreamer")
 parser.add_argument("--id", type=str, help="Experiment ID")
@@ -11,7 +14,7 @@ parser.add_argument("--disable-cuda", action="store_true", help="Disable CUDA")
 parser.add_argument(
     "--env",
     type=str,
-    choices=[],
+    choices=MINIGRID_ENVS,
     help="Gym/Control Suite environment",
 )
 parser.add_argument("--symbolic-env", action="store_true", help="Symbolic features")
@@ -45,36 +48,20 @@ parser.add_argument(
     metavar="E",
     help="Observation embedding size",
 )  # Note that the default encoder for visual observations outputs a 1024D vector; for other embedding sizes an additional fully-connected layer is used
-parser.add_argument(
-    "--hidden-size", type=int, metavar="H", help="Hidden size"
-)
-parser.add_argument(
-    "--belief-size", type=int, metavar="H", help="Belief/hidden size"
-)
-parser.add_argument(
-    "--state-size", type=int, metavar="Z", help="State/latent size"
-)
-parser.add_argument(
-    "--action-repeat", type=int, metavar="R", help="Action repeat"
-)
-parser.add_argument(
-    "--action-noise", type=float, metavar="ε", help="Action noise"
-)
+parser.add_argument("--hidden-size", type=int, metavar="H", help="Hidden size")
+parser.add_argument("--belief-size", type=int, metavar="H", help="Belief/hidden size")
+parser.add_argument("--state-size", type=int, metavar="Z", help="State/latent size")
+parser.add_argument("--action-repeat", type=int, metavar="R", help="Action repeat")
+parser.add_argument("--action-noise", type=float, metavar="ε", help="Action noise")
 parser.add_argument(
     "--episodes", type=int, metavar="E", help="Total number of episodes"
 )
-parser.add_argument(
-    "--seed-episodes", type=int, metavar="S", help="Seed episodes"
-)
+parser.add_argument("--seed-episodes", type=int, metavar="S", help="Seed episodes")
 parser.add_argument(
     "--collect-interval", type=int, metavar="C", help="Collect interval"
 )
-parser.add_argument(
-    "--batch-size", type=int, metavar="B", help="Batch size"
-)
-parser.add_argument(
-    "--chunk-size", type=int, metavar="L", help="Chunk size"
-)
+parser.add_argument("--batch-size", type=int, metavar="B", help="Batch size")
+parser.add_argument("--chunk-size", type=int, metavar="L", help="Chunk size")
 parser.add_argument(
     "--worldmodel-LogProbLoss",
     action="store_true",
@@ -112,13 +99,13 @@ parser.add_argument(
     help="Image bit depth (quantisation)",
 )
 parser.add_argument(
-    "--model_learning-rate", type=float,  metavar="α", help="Learning rate"
+    "--model_learning-rate", type=float, metavar="α", help="Learning rate"
 )
 parser.add_argument(
-    "--actor_learning-rate", type=float,  metavar="α", help="Learning rate"
+    "--actor_learning-rate", type=float, metavar="α", help="Learning rate"
 )
 parser.add_argument(
-    "--value_learning-rate", type=float,  metavar="α", help="Learning rate"
+    "--value_learning-rate", type=float, metavar="α", help="Learning rate"
 )
 parser.add_argument(
     "--learning-rate-schedule",
@@ -129,7 +116,6 @@ parser.add_argument(
 parser.add_argument(
     "--adam-epsilon",
     type=float,
-    
     metavar="ε",
     help="Adam optimizer epsilon value",
 )
@@ -137,7 +123,6 @@ parser.add_argument(
 parser.add_argument(
     "--grad-clip-norm",
     type=float,
-    
     metavar="C",
     help="Gradient clipping norm",
 )
@@ -150,14 +135,12 @@ parser.add_argument(
 parser.add_argument(
     "--discount",
     type=float,
-    
     metavar="H",
     help="Planning horizon distance",
 )
 parser.add_argument(
     "--disclam",
     type=float,
-    
     metavar="H",
     help="discount rate to compute return",
 )
@@ -198,9 +181,7 @@ parser.add_argument(
 parser.add_argument(
     "--checkpoint-experience", action="store_true", help="Checkpoint experience replay"
 )
-parser.add_argument(
-    "--models", type=str, metavar="M", help="Load model checkpoint"
-)
+parser.add_argument("--models", type=str, metavar="M", help="Load model checkpoint")
 parser.add_argument(
     "--experience-replay",
     type=str,
@@ -221,8 +202,8 @@ parser.add_argument(
     help="Violation threshold in BPS",
 )
 parser.add_argument(
-    "--path", 
+    "--path",
     type=Path,
-    default=Path('configs/default.yaml'),
-    help="Path to config file"
+    default=Path("configs/default.yaml"),
+    help="Path to config file",
 )

@@ -10,8 +10,8 @@ dense_activation_function: "elu"
 
 embedding_size: 128
 hidden_size: 1024
-belief_size: 200
-state_size: 200
+belief_size: 256
+state_size: 128
 action_repeat: 1
 action_noise: 0.3
 episodes: 150
@@ -20,7 +20,7 @@ collect_interval: 100
 batch_size: 50
 chunk_size: 50
 worldmodel_LogProbLoss: False
-overshooting_distance: 25
+overshooting_distance: 15
 overshooting_kl_beta: 0
 overshooting_reward_scale: 0
 global_kl_beta: 0
@@ -50,4 +50,4 @@ models: ""
 experience_replay: ""
 render: False
 paths_to_sample: 10
-violation_threshold: 3
+violation_threshold: 4
