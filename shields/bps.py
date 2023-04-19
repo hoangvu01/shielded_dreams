@@ -93,24 +93,23 @@ class ShieldBatcher(Shield):
         self,
         shield_class,
         envs,
-        transition_model,
-        violation_model,
-        depth=3,
-        violation_threshold=3,
-        paths_to_sample=40,
+        *vargs,
+        **kwargs,
+        # transition_model,
+        # violation_model,
+        # depth=3,
+        # violation_threshold=3,
+        # paths_to_sample=40,
     ):
         self._shields = [
             shield_class(
-                transition_model,
-                violation_model,
-                depth,
-                violation_threshold=violation_threshold,
-                paths_to_sample=paths_to_sample,
+                # vargs,
+                # kwargs,
             )
             for i in range(len(envs))
         ]
 
-    def step(self, beliefs, states, actions, decoder, policy, observations, encoder):
+    def step(self, beliefs, states, actions, policy):
         safe_actions = []
         had_to_interfere = [0 for i in range(len(actions))]
         for i, action in enumerate(actions.split(1)):
@@ -118,10 +117,7 @@ class ShieldBatcher(Shield):
                 beliefs[i].unsqueeze(0),
                 states[i].unsqueeze(0),
                 action,
-                decoder,
                 policy,
-                observations[i],
-                encoder,
             )
             safe_actions.append(safe_action.cpu())
             had_to_interfere[i] = 1 if interfered else 0

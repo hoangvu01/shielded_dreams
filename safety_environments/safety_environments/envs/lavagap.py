@@ -89,7 +89,7 @@ class LavaGapMinigrid(gymnasium.Env):
             if hit_lava:
                 self.lava_hits += 1
                 violation = 1
-                reward = -0.25
+                reward = -0.1
                 if self._lava_death:
                     done = True
 
