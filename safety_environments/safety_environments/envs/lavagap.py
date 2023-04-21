@@ -82,10 +82,10 @@ class LavaGapMinigrid(gymnasium.Env):
         done = False
         reward = -0.01
 
-        if action == 2:
-            hit_wall = isinstance(fwd_cell, Wall)
-            hit_lava = isinstance(fwd_cell, Lava)
+        hit_wall = isinstance(fwd_cell, Wall)
+        hit_lava = isinstance(fwd_cell, Lava)
 
+        if action == 2:
             if hit_lava:
                 self.lava_hits += 1
                 violation = 1
@@ -110,7 +110,8 @@ class LavaGapMinigrid(gymnasium.Env):
 
         flattened_obs = partial_obs.reshape(1, -1)
         obs["image"] = flattened_obs
-        info["violation"] = violation
+
+        info["violation"] = np.array([hit_wall, hit_lava], dtype=np.int_).reshape(1, -1)
 
         return obs, reward, done, False, info
 
@@ -128,6 +129,14 @@ class LavaGapMinigrid(gymnasium.Env):
     def action_size(self):
         return self.action_space.n.item()
 
+    @property
+    def violation_size(self):
+        return 2
+
+    @property
+    def violation_keys(self):
+        return ["hit_wall", "hit_lava"]
+
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
         a = random.randint(0, self.action_size - 1)
@@ -142,7 +151,7 @@ if __name__ == "__main__":
         try:
             cmd = int(input("Move? (0, 1, 2) "))
             state, reward, done, _, info = e.step(cmd)
-            print(reward, info["violation"])
+            print(state, reward, info["violation"])
             e.render()
             if done:
                 e.reset()

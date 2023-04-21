@@ -99,6 +99,7 @@ class Dreamer:
         self.violation_model = ViolationModel(
             self._c.belief_size,
             self._c.state_size,
+            self._env.violation_size,
             self._c.hidden_size,
             self._c.dense_activation_function,
         )
@@ -266,15 +267,16 @@ class Dreamer:
             reduction="none",
         ).mean(dim=(0, 1))
 
-        violation_loss = F.cross_entropy(
+        violation_batch_size = violations[:-1].size()
+        violation_loss = F.binary_cross_entropy(
             bottle(
                 self.violation_model,
                 (
                     beliefs,
                     posterior_states,
                 ),
-            ).reshape(len(violations[:-1]) * len(violations), 2),
-            violations[:-1].reshape(len(violations[:-1]) * len(violations)),
+            ).reshape(violation_batch_size, self._env.violation_size),
+            violations[:-1].reshape(violation_batch_size, self._env.violation_size),
             reduction="none",
         ).mean()
 

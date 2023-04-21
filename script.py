@@ -1,44 +1,44 @@
 import argparse
-from collections import defaultdict
 import os
 import time
-import numpy as np
-import yaml
+from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import torch
+import yaml
 from torch import nn, optim
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
+from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-from config import parser
-from dreamer import Dreamer
-from environments.env import Env, EnvBatcher
-from environments.memory import ExperienceReplay
 from agent.models import (
-    bottle,
+    ActorModel,
     Encoder,
     ObservationModel,
     RewardModel,
     TransitionModel,
     ValueModel,
-    ActorModel,
     ViolationModel,
+    bottle,
 )
 from agent.planner import MPCPlanner
+from config import parser
+from dreamer import Dreamer
+from environments.env import Env, EnvBatcher
+from environments.memory import ExperienceReplay
 from shields.bps import BoundedPrescienceShield, ShieldBatcher
 from utils import (
-    lineplot,
-    write_video,
+    ActivateParameters,
+    FreezeParameters,
     imagine_ahead,
     lambda_return,
-    FreezeParameters,
-    ActivateParameters,
+    lineplot,
+    write_video,
 )
-from torch.utils.tensorboard import SummaryWriter
 
 # Hyper parameters
 args = parser.parse_args()
@@ -91,6 +91,7 @@ if not args.test:
         args.experience_size,
         env.observation_size,
         env.action_size,
+        env.violation_size,
         args.bit_depth,
         args.device,
     )
@@ -98,19 +99,21 @@ if not args.test:
     for s in range(1, args.seed_episodes + 1):
         violation_count = 0
         observation, _ = env.reset()
-        observation = torch.tensor(observation)
+        observation = torch.tensor(observation, dtype=torch.float32)
+
         done, t = False, 0
         while not done:
             action = env.sample_random_action()
             next_observation, reward, done, _, info = env.step(action)
-            next_observation = torch.tensor(next_observation)
+            next_observation = torch.tensor(next_observation, dtype=torch.float32)
 
             violation = info["violation"]
-            if violation:
-                violation_count += 1
+            violation_count += violation.sum()
+
             D.append(observation.cpu(), action.cpu(), reward, violation, done)
             observation = next_observation
             t += 1
+
         metrics["violation_count"].append((s, violation_count))
         metrics["steps"].append(
             t * args.action_repeat
@@ -145,9 +148,9 @@ if args.test:
             total_reward, total_violations = 0, 0
 
             observation, _ = env.reset()
-            observation = torch.tensor(observation).to(torch.float32)
+            observation = torch.tensor(observation, dtype=torch.float32)
 
-            violation = torch.zeros((1, 1))
+            violation = torch.zeros((1, env.violation_size))
             action = torch.zeros(1, env.action_size)
 
             belief, posterior_state = agent.build_initial_params(1)
@@ -168,12 +171,12 @@ if args.test:
 
                 # Perform environment step (action repeats handled internally)
                 observation, reward, done, _, info = env.step(action[0].cpu())
-                observation = torch.tensor(observation).to(torch.float32)
+                observation = torch.tensor(observation, dtype=torch.float32)
+
                 violation = info["violation"]
 
                 total_reward += reward
-                if violation:
-                    total_violations += 1
+                total_violations += violation.sum()
                 if args.render:
                     env.render()
 
@@ -210,6 +213,7 @@ for episode in (
         observations, actions, rewards, violations, nonterminals = D.sample(
             args.batch_size, args.chunk_size
         )
+
         pbar.set_description(f"Episode {episode} - training models ")
         loss = agent.train(observations, actions, rewards, violations, nonterminals)
 
@@ -251,7 +255,7 @@ for episode in (
         belief, posterior_state = agent.build_initial_params(1)
         action, violation = (
             torch.zeros(1, env.action_size),
-            torch.zeros(1, 1),
+            torch.zeros(1, env.violation_size),
         )
 
         for s in (dbar := tqdm(range(args.max_episode_length // args.action_repeat))):
@@ -270,15 +274,15 @@ for episode in (
 
             # Perform environment step (action repeats handled internally)
             next_observation, reward, done, _, info = env.step(action[0].cpu())
-            next_observation = torch.tensor(observation, dtype=torch.float32)
+            next_observation = torch.tensor(next_observation, dtype=torch.float32)
             violation = info["violation"]
 
             D.append(observation.cpu(), action.cpu(), reward, violation, done)
 
             total_reward += reward
             observation = next_observation
-            if violation:
-                violations += 1
+
+            violations += violation.sum()
             if args.render:
                 env.render()
             if done:
@@ -316,7 +320,7 @@ for episode in (
                 observation, _ = env.reset()
                 observation = torch.tensor(observation, dtype=torch.float32)
 
-                violation = torch.zeros((1, 1))
+                violation = torch.zeros((1, env.violation_size))
                 action = torch.zeros(1, env.action_size)
 
                 belief, posterior_state = agent.build_initial_params(1)
@@ -341,8 +345,8 @@ for episode in (
                     violation = info["violation"]
 
                     total_reward += reward
-                    if violation:
-                        total_violations += 1
+                    total_violations += violation.sum()
+
                     if args.render:
                         env.render()
 

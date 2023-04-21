@@ -245,8 +245,8 @@ class ViolationModel(jit.ScriptModule):
         self,
         belief_size,
         state_size,
+        violation_size,
         hidden_size,
-        # violation_size,
         activation_function="relu",
     ):
         # [--belief-size: 200, --hidden-size: 200, --state-size: 30]
@@ -257,8 +257,8 @@ class ViolationModel(jit.ScriptModule):
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
-        self.fc6 = nn.Linear(hidden_size, 2)
-        # self.fc6 = nn.Linear(hidden_size, violation_size)
+        # self.fc6 = nn.Linear(hidden_size, 2)
+        self.fc6 = nn.Linear(hidden_size, violation_size)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
@@ -266,11 +266,11 @@ class ViolationModel(jit.ScriptModule):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
-        # hidden = self.act_fn(self.fc3(hidden))
-        # hidden = self.act_fn(self.fc4(hidden))
+        hidden = self.act_fn(self.fc3(hidden))
+        hidden = self.act_fn(self.fc4(hidden))
         # hidden = self.act_fn(self.fc5(hidden))
-        # violation = torch.sigmoid(self.fc6(hidden))
-        violation = torch.softmax(self.act_fn(self.fc6(hidden)), dim=1).squeeze(dim=1)
+        violation = torch.sigmoid(self.fc6(hidden))
+        # violation = torch.softmax(self.act_fn(self.fc6(hidden)), dim=1).squeeze(dim=1)
         return violation
 
 
@@ -292,9 +292,9 @@ class ValueModel(jit.ScriptModule):
     def forward(self, belief, state):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
-        # hidden = self.act_fn(self.fc2(hidden))
-        # hidden = self.act_fn(self.fc3(hidden))
-        # hidden = self.act_fn(self.fc4(hidden))
+        hidden = self.act_fn(self.fc2(hidden))
+        hidden = self.act_fn(self.fc3(hidden))
+        hidden = self.act_fn(self.fc4(hidden))
         hidden = self.act_fn(self.fc5(hidden))
         reward = self.fc6(hidden).squeeze(dim=1)
         return reward
@@ -343,8 +343,8 @@ class ActorModel(jit.ScriptModule):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
-        # hidden = self.act_fn(self.fc3(hidden))
-        # hidden = self.act_fn(self.fc4(hidden))
+        hidden = self.act_fn(self.fc3(hidden))
+        hidden = self.act_fn(self.fc4(hidden))
         # hidden = self.act_fn(self.fc5(hidden))
         # hidden = self.act_fn(self.fc6(hidden))
         action = self.fc7(hidden).squeeze(dim=1)
