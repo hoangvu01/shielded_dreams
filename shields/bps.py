@@ -53,7 +53,11 @@ class BoundedPrescienceShield(Shield):
         return action, violation_occurred
 
     def imagine_futures(
-        self, belief, state, action, policy, horizon=1, paths_to_sample=40
+        self,
+        belief,
+        state,
+        action,
+        policy,
     ):
         futures = []
         violations = []
@@ -68,7 +72,7 @@ class BoundedPrescienceShield(Shield):
                 ).squeeze()
             ).item()
             traj = [(next_belief, next_state)]
-            for step in range(horizon - 1):
+            for step in range(self.depth - 1):
                 action = policy.get_action(
                     next_belief.view(-1, H), next_state.view(-1, Z)
                 )

@@ -177,7 +177,9 @@ if args.test:
                 if args.render:
                     env.render()
 
-                pbar.set_postfix(r=total_reward, v=total_violations)
+                pbar.set_postfix(
+                    r=total_reward, v=total_violations, interfered=shield_interfered
+                )
                 if done:
                     break
             rewards.append(total_reward)
