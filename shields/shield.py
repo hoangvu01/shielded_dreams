@@ -6,5 +6,5 @@ class Shield(ABC):
         super().__init__()
 
     @abstractclassmethod
-    def step(self, action):
+    def step(self, belief, state, action, policy):
         pass

@@ -1,5 +1,6 @@
 from collections import defaultdict
 import os
+import random
 import time
 import numpy as np
 import yaml
@@ -37,10 +38,28 @@ from utils import (
 )
 
 
+def weighted_bce_loss(target, pred):
+    output_dim = target.size(-1)
+    positives = target.sum(axis=0)
+    negatives = target.numel() / output_dim - positives
+    weights = torch.ones_like(target) + target * (negatives / positives - 1)
+    return F.binary_cross_entropy(pred, target, weight=weights, reduction="none")
+
+
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.xavier_normal_(m.weight)
+        m.bias.data.fill_(0.01)
+
+
 class Dreamer:
     def __init__(self, config, env, results_dir, metrics, writer) -> None:
         self._c = config
         self._env = env
+        self._action_noise = self._c.action_noise
+
+        self._violation_weights = torch.tensor([0.5, 0.5])
+        self._reward_weights = torch.tensor([0.5, 0.5])
 
         self._metrics = metrics
         self._results_dir = results_dir
@@ -72,6 +91,7 @@ class Dreamer:
         self.actor_model.load_state_dict(model_dicts["actor_model"])
         self.value_model.load_state_dict(model_dicts["value_model"])
 
+        print("Model loaded successfully")
         return model_dicts
 
     def _build_models(self) -> None:
@@ -113,7 +133,8 @@ class Dreamer:
             self._c.state_size,
             self._c.hidden_size,
             self._env.action_size,
-            self._c.dense_activation_function,
+            dist=self._c.actor_distribution,
+            activation_function=self._c.dense_activation_function,
         )
         self.value_model = ValueModel(
             self._c.belief_size,
@@ -121,11 +142,6 @@ class Dreamer:
             self._c.hidden_size,
             self._c.dense_activation_function,
         )
-
-        if self._c.learning_rate_schedule != 0:
-            lr = 0
-        else:
-            lr = self._c.model_learning_rate
 
         self.model_opt = optim.Adam(
             list(self.transition_model.parameters())
@@ -136,7 +152,7 @@ class Dreamer:
             lr=self._c.model_learning_rate,
             eps=self._c.adam_epsilon,
         )
-
+        # print(list(self.actor_model.parameters()))
         self.actor_opt = optim.Adam(
             self.actor_model.parameters(),
             lr=self._c.actor_learning_rate,
@@ -165,6 +181,11 @@ class Dreamer:
             + list(self.encoder.parameters())
         )
 
+        self.transition_model.apply(weights_init)
+        self.violation_model.apply(weights_init)
+        self.actor_model.apply(weights_init)
+        self.value_model.apply(weights_init)
+
     def set_eval(self):
         self.transition_model.eval()
         self.reward_model.eval()
@@ -189,9 +210,11 @@ class Dreamer:
         self._writer.add_scalar(
             "train/episode_reward",
             self._metrics["train_rewards"][-1],
-            s * self._c.action_repeat,
+            self._metrics["episodes"][-1],
         )
-        self._writer.add_scalar("train_reward", self._metrics["train_rewards"][-1], s)
+        self._writer.add_scalar(
+            "train/step_reward", self._metrics["train_rewards"][-1], s
+        )
 
         for metric in [
             "observation_loss",
@@ -233,6 +256,7 @@ class Dreamer:
     def train(self, obs, actions, rewards, violations, nonterminals):
         init_belief, init_state = self.build_initial_params(self._c.batch_size)
         embedded_observations = bottle(self.encoder, (obs[1:],))
+
         # Update belief/state using posterior from previous belief/state, previous action and current observation (over entire sequence at once)
         (
             beliefs,
@@ -242,6 +266,7 @@ class Dreamer:
             posterior_states,
             posterior_means,
             posterior_std_devs,
+            posterior_nonterminals,
         ) = self.transition_model(
             init_state,
             actions[:-1],
@@ -249,7 +274,6 @@ class Dreamer:
             embedded_observations,
             nonterminals[:-1],
         )
-
         # Calculate observation likelihood, reward likelihood and KL losses (for t = 0 only for latent overshooting); sum over final dims, average over batch and time (original implementation, though paper seems to miss 1/T scaling?)
         observation_loss = (
             F.mse_loss(
@@ -267,17 +291,19 @@ class Dreamer:
             reduction="none",
         ).mean(dim=(0, 1))
 
-        violation_batch_size = violations[:-1].size()
-        violation_loss = F.binary_cross_entropy(
+        # terminal_loss = weighted_bce_loss(
+        #     nonterminals[:-1], posterior_nonterminals
+        # ).mean()
+
+        violation_loss = weighted_bce_loss(
+            violations[:-1].reshape(-1, self._env.violation_size),
             bottle(
                 self.violation_model,
                 (
                     beliefs,
                     posterior_states,
                 ),
-            ).reshape(violation_batch_size, self._env.violation_size),
-            violations[:-1].reshape(violation_batch_size, self._env.violation_size),
-            reduction="none",
+            ).reshape(-1, self._env.violation_size),
         ).mean()
 
         kl_loss = 0.8 * kl_divergence(
@@ -301,7 +327,13 @@ class Dreamer:
                 Normal(posterior_means, posterior_std_devs), global_prior
             ).sum(dim=2).mean(dim=(0, 1))
 
-        model_loss = observation_loss + reward_loss + kl_loss + violation_loss
+        model_loss = (
+            observation_loss
+            + reward_loss
+            + kl_loss
+            + violation_loss
+            # + 0.01 * terminal_loss
+        )
         # Update model parameters
         self.model_opt.zero_grad()
         model_loss.backward()
@@ -310,8 +342,8 @@ class Dreamer:
 
         # Dreamer implementation: actor loss calculation and optimization
         with torch.no_grad():
-            actor_states = posterior_states.detach()
-            actor_beliefs = beliefs.detach()
+            actor_states = posterior_states.detach().flatten(start_dim=0, end_dim=1)
+            actor_beliefs = beliefs.detach().flatten(start_dim=0, end_dim=1)
         with FreezeParameters(self.model_modules):
             imagination_traj = imagine_ahead(
                 actor_states,
@@ -325,7 +357,12 @@ class Dreamer:
             imged_prior_states,
             imged_prior_means,
             imged_prior_std_devs,
+            imged_entropies,
+            imged_nonterminals,
         ) = imagination_traj
+
+        imged_nonterminals = torch.cumprod(imged_nonterminals.squeeze(-1), dim=0)
+
         with FreezeParameters(self.model_modules + self.value_model.modules):
             imged_reward = bottle(
                 self.reward_model, (imged_beliefs, imged_prior_states)
@@ -334,11 +371,16 @@ class Dreamer:
         returns = lambda_return(
             imged_reward,
             value_pred,
+            imged_nonterminals,
             bootstrap=value_pred[-1],
             discount=self._c.discount,
             lambda_=self._c.disclam,
         )
-        actor_loss = -torch.mean(returns)
+
+        actor_loss = (
+            -returns.sum(dim=0).mean()
+            # - self._c.entropy_coefficient * imged_entropies.sum(dim=0).mean()
+        )
         # Update model parameters
         self.actor_opt.zero_grad()
         actor_loss.backward()
@@ -384,15 +426,11 @@ class Dreamer:
     ):
         # Infer belief over current state q(s_t|o≤t,a<t) from the history
         # Action and observation need extra time dimension
-        belief, _, _, _, posterior_state, _, _ = self.transition_model(
+        belief, _, _, _, posterior_state, _, _, _ = self.transition_model(
             state,
             action.unsqueeze(dim=0),
             belief,
             self.encoder(observation).unsqueeze(dim=0),
-        )
-
-        imagd_violation = torch.argmax(
-            bottle(self.violation_model, (belief, posterior_state)).squeeze()
         )
 
         # Remove time dimension
@@ -400,11 +438,14 @@ class Dreamer:
         posterior_state = posterior_state.squeeze(0)
 
         action = self.actor_model.get_action(belief, posterior_state, det=not (explore))
-
         if explore:
             # Add gaussian exploration noise on top of the sampled action
-            action = torch.clamp(
-                Normal(action.float(), self._c.action_noise).rsample(), -1, 1
-            )
+            probs = torch.softmax(action, 1, dtype=torch.float32)
+            noise = Normal(probs, self._action_noise).rsample()
+            action += noise
 
+            self._action_noise = max(
+                self._action_noise * self._c.action_noise_decay,
+                self._c.action_noise_min,
+            )
         return belief, posterior_state, action
