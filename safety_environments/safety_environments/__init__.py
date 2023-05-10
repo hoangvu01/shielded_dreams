@@ -51,22 +51,6 @@ gymnasium.register(
     "DistShift1",
     entry_point="safety_environments.envs:DistShiftMinigrid",
     kwargs={
-        "lava_death": True,
-    },
-)
-
-gymnasium.register(
-    "DistShift1-Relaxed",
-    entry_point="safety_environments.envs:DistShiftMinigrid",
-    kwargs={
-        "lava_death": False,
-    },
-)
-
-gymnasium.register(
-    "DistShift1",
-    entry_point="safety_environments.envs:DistShiftMinigrid",
-    kwargs={
         "version": 1,
         "lava_death": True,
     },

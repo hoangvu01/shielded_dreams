@@ -32,7 +32,7 @@ class EnvBatcher:
     # Resets every environment and returns observation
     def reset(self):
         observations = [
-            torch.tensor(env.reset()[0]).to(torch.float32) for env in self.envs
+            torch.tensor(env.reset()[0], dtype=torch.float32) for env in self.envs
         ]
         self.dones = [False] * self.n
         return torch.cat(observations)
@@ -46,7 +46,7 @@ class EnvBatcher:
             *[env.step(action) for env, action in zip(self.envs, actions)]
         )
 
-        observations = [torch.tensor(o).to(torch.float32) for o in observations]
+        observations = [torch.tensor(o, dtype=torch.float32) for o in observations]
         violations = [info["violation"] for info in infos]
         # Env should remain terminated if previously terminated
         dones = [d or prev_d for d, prev_d in zip(dones, self.dones)]

@@ -8,7 +8,7 @@ from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from minigrid.core.world_object import Lava, Goal, Wall
 
 
-class LavaGapMinigrid(gymnasium.Env):
+class ObstaclesMinigrid(gymnasium.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
     def __init__(
@@ -17,15 +17,16 @@ class LavaGapMinigrid(gymnasium.Env):
         action_repeat=1,
         bit_depth=1,
         render_mode="human",
+        gridsize=5,
+        random=True,
         screen_size=300,
-        grid_size=5,
-        lava_death=False,
     ):
         super().__init__()
 
         # Environment config
+        random_obs = "-Random" if random else ""
         _env = gymnasium.make(
-            f"MiniGrid-LavaGapS{grid_size}-v0",
+            "MiniGrid-Dynamic-Obstacles" + random_obs + f"-{gridsize}x{gridsize}-v0",
             render_mode=render_mode,
             max_episode_steps=max_episode_steps,
             screen_size=screen_size,
@@ -48,8 +49,6 @@ class LavaGapMinigrid(gymnasium.Env):
         self._env = _env
         self._env_partial = ImgObsWrapper(_env)  # Without 'mission' field
         self._env_full = FullyObsWrapper(_env)  # Fully observable grid
-
-        self._lava_death = lava_death
 
         self._t = 0
         self.wall_hits = 0
@@ -77,17 +76,25 @@ class LavaGapMinigrid(gymnasium.Env):
         x, y = self._env_partial.agent_pos
         rx, ry = self._env.relative_coords(x, y)
 
-        reward = 0
-        done, hit_wall, hit_lava = False, False, False
-        if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
-            self.lava_hits += 1
-            reward = -0.1
-            hit_lava = True
+        violation = 0
+
+        done = False
+        reward = -0.01
 
         if action == 2:
-            if isinstance(fwd_cell, Wall):
-                hit_wall = True
+            hit_wall = isinstance(fwd_cell, Wall)
+            hit_lava = isinstance(fwd_cell, Lava)
+
+            if hit_lava:
+                self.lava_hits += 1
+                violation = 1
+                reward = -0.1
+                if self._lava_death:
+                    done = True
+
+            elif hit_wall:
                 self.wall_hits += 1
+                violation = 1
 
             # Replaces current position with object
             if fwd_cell is not None:
@@ -96,13 +103,13 @@ class LavaGapMinigrid(gymnasium.Env):
             if isinstance(fwd_cell, Goal):
                 done = True
                 reward = 1
+
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
 
         flattened_obs = partial_obs.reshape(1, -1)
         obs["image"] = flattened_obs
-
-        info["violation"] = np.array([hit_wall, hit_lava], dtype=np.int_).reshape(1, -1)
+        info["violation"] = violation
 
         return obs, reward, done, False, info
 
@@ -124,10 +131,6 @@ class LavaGapMinigrid(gymnasium.Env):
     def violation_size(self):
         return 2
 
-    @property
-    def violation_keys(self):
-        return ["hit_wall", "hit_lava"]
-
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
         a = random.randint(0, self.action_size - 1)
@@ -135,14 +138,14 @@ class LavaGapMinigrid(gymnasium.Env):
 
 
 if __name__ == "__main__":
-    e = LavaGapMinigrid(render_mode="human")
+    e = ObstaclesMinigrid(render_mode="human", gridsize=6, random=True)
     e.reset()
     e.render()
     while True:
         try:
             cmd = int(input("Move? (0, 1, 2) "))
             state, reward, done, _, info = e.step(cmd)
-            print(state, reward, info["violation"])
+            print(reward, info["violation"])
             e.render()
             if done:
                 e.reset()

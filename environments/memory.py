@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 
+
 class ExperienceReplay:
     def __init__(
-        self, size, observation_size, action_size, bit_depth, device
+        self, size, observation_size, action_size, violation_size, bit_depth, device
     ):
         self.device = device
         self.size = size
@@ -13,7 +14,7 @@ class ExperienceReplay:
         )
         self.actions = np.empty((size, action_size), dtype=np.float32)
         self.rewards = np.empty((size,), dtype=np.float32)
-        self.violations = np.empty((size,), dtype=np.int_)
+        self.violations = np.empty((size, violation_size), dtype=np.float32)
         self.nonterminals = np.empty((size, 1), dtype=np.float32)
         self.idx = 0
         self.full = False  # Tracks if memory has been filled/all slots are valid
@@ -33,7 +34,7 @@ class ExperienceReplay:
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
         self.steps, self.episodes = self.steps + 1, self.episodes + (1 if done else 0)
-        self.violation_count += 1 if violation == 1 else 0
+        self.violation_count += violation.sum()
 
     # Returns an index for a valid single sequence chunk uniformly sampled from the memory
     def _sample_idx(self, L):
@@ -53,7 +54,7 @@ class ExperienceReplay:
             observations.reshape(L, n, *observations.shape[1:]),
             self.actions[vec_idxs].reshape(L, n, -1),
             self.rewards[vec_idxs].reshape(L, n),
-            self.violations[vec_idxs].reshape(L, n),
+            self.violations[vec_idxs].reshape(L, n, -1),
             self.nonterminals[vec_idxs].reshape(L, n, 1),
         )
 

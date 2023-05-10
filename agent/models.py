@@ -3,8 +3,10 @@ import torch
 from torch import jit, nn
 from torch.nn import functional as F
 import torch.distributions
+from torch.distributions import OneHotCategorical, RelaxedOneHotCategorical
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import TanhTransform
 import numpy as np
 
 
@@ -43,12 +45,19 @@ class TransitionModel(jit.ScriptModule):
             belief_size + embedding_size, hidden_size
         )
         self.fc_state_posterior = nn.Linear(hidden_size, 2 * state_size)
+        self.fc_nonterminal = nn.Sequential(
+            nn.Linear(belief_size + state_size, hidden_size),
+            nn.ELU(),
+            nn.Linear(hidden_size, 1),
+            nn.Sigmoid(),
+        )
         self.modules = [
             self.fc_embed_state_action,
             self.fc_embed_belief_prior,
             self.fc_state_prior,
             self.fc_embed_belief_posterior,
             self.fc_state_posterior,
+            self.fc_nonterminal,
         ]
 
     # Operates over (previous) state, (previous) actions, (previous) belief, (previous) nonterminals (mask), and (current) observations
@@ -85,7 +94,9 @@ class TransitionModel(jit.ScriptModule):
             posterior_states,
             posterior_means,
             posterior_std_devs,
+            posterior_nonterminals,
         ) = (
+            [torch.empty(0)] * T,
             [torch.empty(0)] * T,
             [torch.empty(0)] * T,
             [torch.empty(0)] * T,
@@ -111,6 +122,7 @@ class TransitionModel(jit.ScriptModule):
             hidden = self.act_fn(
                 self.fc_embed_state_action(torch.cat([_state, actions[t]], dim=1))
             )
+
             beliefs[t + 1] = self.rnn(hidden, beliefs[t])
             # Compute state prior by applying transition dynamics
             hidden = self.act_fn(self.fc_embed_belief_prior(beliefs[t + 1]))
@@ -140,6 +152,10 @@ class TransitionModel(jit.ScriptModule):
                 posterior_states[t + 1] = posterior_means[t + 1] + posterior_std_devs[
                     t + 1
                 ] * torch.randn_like(posterior_means[t + 1])
+                # posterior_nonterminals[t + 1] = self.fc_nonterminal(
+                #     torch.cat([beliefs[t + 1], posterior_states[t + 1]], dim=1)
+                # )
+
         # Return new hidden states
         hidden = [
             torch.stack(beliefs[1:], dim=0),
@@ -152,6 +168,7 @@ class TransitionModel(jit.ScriptModule):
                 torch.stack(posterior_states[1:], dim=0),
                 torch.stack(posterior_means[1:], dim=0),
                 torch.stack(posterior_std_devs[1:], dim=0),
+                torch.stack(posterior_nonterminals[1:], dim=0),
             ]
         return hidden
 
@@ -242,7 +259,12 @@ class RewardModel(jit.ScriptModule):
 
 class ViolationModel(jit.ScriptModule):
     def __init__(
-        self, belief_size, state_size, hidden_size, activation_function="relu"
+        self,
+        belief_size,
+        state_size,
+        violation_size,
+        hidden_size,
+        activation_function="relu",
     ):
         # [--belief-size: 200, --hidden-size: 200, --state-size: 30]
         super().__init__()
@@ -252,7 +274,8 @@ class ViolationModel(jit.ScriptModule):
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
-        self.fc6 = nn.Linear(hidden_size, 2)
+        # self.fc6 = nn.Linear(hidden_size, 2)
+        self.fc6 = nn.Linear(hidden_size, violation_size)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
@@ -260,10 +283,11 @@ class ViolationModel(jit.ScriptModule):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
-        hidden = self.act_fn(self.fc3(hidden))
-        hidden = self.act_fn(self.fc4(hidden))
-        hidden = self.act_fn(self.fc5(hidden))
-        violation = torch.softmax(self.act_fn(self.fc6(hidden)), dim=1).squeeze(dim=1)
+        # hidden = self.act_fn(self.fc3(hidden))
+        # hidden = self.act_fn(self.fc4(hidden))
+        # hidden = self.act_fn(self.fc5(hidden))
+        violation = torch.sigmoid(self.fc6(hidden))
+        # violation = torch.softmax(self.act_fn(self.fc6(hidden)), dim=1).squeeze(dim=1)
         return violation
 
 
@@ -277,16 +301,16 @@ class ValueModel(jit.ScriptModule):
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
-        self.fc5 = nn.Linear(hidden_size, hidden_size // 2)
-        self.fc6 = nn.Linear(hidden_size // 2, 1)
+        self.fc5 = nn.Linear(hidden_size, hidden_size)
+        self.fc6 = nn.Linear(hidden_size, 1)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
     def forward(self, belief, state):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
-        hidden = self.act_fn(self.fc2(hidden))
-        hidden = self.act_fn(self.fc3(hidden))
+        # hidden = self.act_fn(self.fc2(hidden))
+        # hidden = self.act_fn(self.fc3(hidden))
         hidden = self.act_fn(self.fc4(hidden))
         hidden = self.act_fn(self.fc5(hidden))
         reward = self.fc6(hidden).squeeze(dim=1)
@@ -302,11 +326,12 @@ class ActorModel(jit.ScriptModule):
         action_size,
         dist="tanh_normal",
         activation_function="elu",
-        min_std=1e-4,
-        init_std=5,
-        mean_scale=5,
+        min_std=0.5,
+        init_std=1,
+        mean_scale=3,
     ):
         super().__init__()
+
         self.act_fn = getattr(F, activation_function)
         self.fc1 = nn.Linear(belief_size + state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -314,7 +339,14 @@ class ActorModel(jit.ScriptModule):
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
         self.fc6 = nn.Linear(hidden_size, hidden_size)
-        self.fc7 = nn.Linear(hidden_size, 2 * action_size)
+
+        if dist == "tanh_normal":
+            self.fc_last = nn.Linear(hidden_size, 2 * action_size)
+        elif dist == "one_hot" or dist == "one_hot_relaxed":
+            self.fc_last = nn.Linear(hidden_size, action_size)
+        else:
+            raise NotImplementedError("Invalid distribution")
+
         self.modules = [
             self.fc1,
             self.fc2,
@@ -322,7 +354,7 @@ class ActorModel(jit.ScriptModule):
             self.fc4,
             self.fc5,
             self.fc6,
-            self.fc7,
+            self.fc_last,
         ]
 
         self._dist = dist
@@ -338,94 +370,35 @@ class ActorModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
         hidden = self.act_fn(self.fc4(hidden))
-        hidden = self.act_fn(self.fc5(hidden))
-        hidden = self.act_fn(self.fc6(hidden))
-        action = self.fc7(hidden).squeeze(dim=1)
-
-        action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
-        action_mean = self._mean_scale * torch.tanh(action_mean / self._mean_scale)
-        action_std = F.softplus(action_std_dev + raw_init_std) + self._min_std
-        return action_mean, action_std
+        # hidden = self.act_fn(self.fc5(hidden))
+        # hidden = self.act_fn(self.fc6(hidden))
+        if self._dist == "tanh_normal":
+            action = self.fc_last(hidden).squeeze(dim=1)
+            action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
+            action_mean = self._mean_scale * torch.tanh(action_mean * self._mean_scale)
+            action_std = F.softplus(action_std_dev + raw_init_std) + self._min_std
+            return action_mean, action_std
+        else:
+            return self.fc_last(hidden), None
 
     def get_action(self, belief, state, det=False):
-        action_mean, action_std = self.forward(belief, state)
-        dist = Normal(action_mean, action_std)
-        dist = TransformedDistribution(dist, TanhBijector())
-        dist = torch.distributions.Independent(dist, 1)
-        dist = SampleDist(dist)
+        if self._dist == "tanh_normal":
+            action_mean, action_std = self.forward(belief, state)
+            dist = Normal(action_mean, action_std)
+            dist = TransformedDistribution(dist, TanhBijector())
+            dist = torch.distributions.Independent(dist, 1)
+            dist = SampleDist(dist)
+        elif self._dist == "one_hot_relaxed":
+            logits, _ = self.forward(belief, state)
+            dist = OneHotCategorical(logits=logits)
+        elif self._dist == "one_hot":
+            logits, _ = self.forward(belief, state)
+            dist = RelaxedOneHotCategorical(0.1, logits=logits)
+
         if det:
             return dist.mode()
         else:
             return dist.rsample()
-
-
-class ShieldedActorModel(jit.ScriptModule):
-    def __init__(
-        self,
-        belief_size,
-        state_size,
-        hidden_size,
-        action_size,
-        shield,
-        dist="tanh_normal",
-        activation_function="elu",
-        min_std=1e-4,
-        init_std=5,
-        mean_scale=5,
-    ):
-        super().__init__()
-        self.act_fn = getattr(F, activation_function)
-        self.fc1 = nn.Linear(belief_size + state_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, hidden_size)
-        self.fc4 = nn.Linear(hidden_size, hidden_size)
-        self.fc5 = nn.Linear(hidden_size, hidden_size)
-        self.fc6 = nn.Linear(hidden_size, hidden_size)
-
-        self.fc7 = nn.Linear(hidden_size, 2 * action_size)
-        self.modules = [
-            self.fc1,
-            self.fc2,
-            self.fc3,
-            self.fc4,
-            self.fc5,
-            self.fc6,
-            self.fc7,
-        ]
-
-        self._dist = dist
-        self._min_std = min_std
-        self._init_std = init_std
-        self._mean_scale = mean_scale
-        self._shield = shield
-
-    @jit.script_method
-    def forward(self, belief, state):
-        raw_init_std = torch.log(torch.exp(self._init_std) - 1)
-        x = torch.cat([belief, state], dim=1)
-        hidden = self.act_fn(self.fc1(x))
-        hidden = self.act_fn(self.fc2(hidden))
-        hidden = self.act_fn(self.fc3(hidden))
-        hidden = self.act_fn(self.fc4(hidden))
-        hidden = self.act_fn(self.fc5(hidden))
-        hidden = self.act_fn(self.fc6(hidden))
-        action = self.fc7(hidden).squeeze(dim=1)
-
-        action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
-        action_mean = self._mean_scale * torch.tanh(action_mean / self._mean_scale)
-        action_std = F.softplus(action_std_dev + raw_init_std) + self._min_std
-        return action_mean, action_std
-
-    def get_action(self, belief, state, det=False):
-        action_mean, action_std = self.forward(belief, state)
-        dist = Normal(action_mean, action_std)
-        dist = TransformedDistribution(dist, TanhBijector())
-        dist = torch.distributions.Independent(dist, 1)
-        dist = SampleDist(dist)
-        if det:
-            return self._shield.step(dist.mode())
-        else:
-            return self._shield.step(dist.rsample())
 
 
 class SymbolicEncoder(jit.ScriptModule):
@@ -522,7 +495,7 @@ class SampleDist:
         return getattr(self._dist, name)
 
     def mean(self):
-        sample = dist.rsample()
+        sample = self._dist.rsample()
         return torch.mean(sample, 0)
 
     def mode(self):

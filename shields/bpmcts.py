@@ -1,13 +1,12 @@
 from agent.models import TransitionModel, ViolationModel
 import torch
 from torch.distributions import Normal
-import torch.functional as F
 import numpy as np
 
 from .shield import Shield
 
 
-class BoundedPrescienceShield(Shield):
+class BoundedPrescienceMCTSShield(Shield):
     def __init__(
         self,
         transition_model: TransitionModel,
