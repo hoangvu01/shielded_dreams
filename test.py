@@ -1,44 +1,14 @@
-import argparse
 import os
-import time
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 import torch
 import yaml
-from torch import nn, optim
-from torch.distributions import Normal
-from torch.distributions.kl import kl_divergence
-from torch.nn import functional as F
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-from agent.models import (
-    ActorModel,
-    Encoder,
-    ObservationModel,
-    RewardModel,
-    TransitionModel,
-    ValueModel,
-    ViolationModel,
-    bottle,
-)
-from agent.planner import MPCPlanner
 from config import parser
 from dreamer import Dreamer
-from environments.env import Env, EnvBatcher
-from environments.memory import ExperienceReplay
-from shields.bps import BoundedPrescienceShield, ShieldBatcher
-from utils import (
-    ActivateParameters,
-    FreezeParameters,
-    imagine_ahead,
-    lambda_return,
-    lineplot,
-    write_video,
-)
+from environments.env import Env
 
 # Hyper parameters
 args = parser.parse_args()
@@ -47,10 +17,6 @@ with open(args.path, "r") as fp:
     defaults = yaml.safe_load(fp)
     parser.set_defaults(**defaults)
     args = parser.parse_args()
-
-args.overshooting_distance = min(
-    args.chunk_size, args.overshooting_distance
-)  # Overshooting distance cannot be greater than chunk size
 
 # Setup
 results_dir = os.path.join("results", "{}_{}".format(args.env, args.id))
@@ -104,7 +70,7 @@ with torch.no_grad():
         for s in range(args.max_episode_length):
             pbar.set_description(f"Testing - Step {s} / Episode {t} ")
             belief, posterior_state, action = agent.policy(
-                belief, posterior_state, action, observation, explore=False
+                belief, posterior_state, action, observation, explore=True
             )
 
             shield_action, shield_interfered = shield.step(
@@ -112,11 +78,19 @@ with torch.no_grad():
                 posterior_state,
                 action,
                 agent.actor_model,
+                300
             )
-            # action = shield_action
-            print(action)
+            action = shield_action
 
             # Perform environment step (action repeats handled internally)
+            pbar.set_postfix(
+                r=total_reward,
+                v=total_violations,
+                interfered=shield_interfered,
+                action=action.argmax().item(),
+                shield=shield_action.argmax().item(),
+            )
+            input("Continue")
             observation, reward, done, _, info = env.step(action.cpu())
             observation = torch.tensor(observation, dtype=torch.float32)
 
@@ -127,13 +101,6 @@ with torch.no_grad():
             if args.render:
                 env.render()
 
-            pbar.set_postfix(
-                r=total_reward,
-                v=total_violations,
-                interfered=shield_interfered,
-                action=action.argmax().item(),
-                shield=shield_action.argmax().item(),
-            )
             if done:
                 break
         rewards.append(total_reward)

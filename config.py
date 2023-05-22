@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from typing import Optional
 
 import torch.nn.functional as F
 
@@ -12,10 +13,9 @@ parser.add_argument("--id", type=str, help="Experiment ID")
 parser.add_argument("--seed", type=int, metavar="S", help="Random seed")
 parser.add_argument("--disable-cuda", action="store_true", help="Disable CUDA")
 parser.add_argument(
-    "--env",
-    type=str,
-    choices=MINIGRID_ENVS,
-    help="Gym/Control Suite environment",
+    "--env-seed",
+    type=int,
+    default=None,
 )
 parser.add_argument("--symbolic-env", action="store_true", help="Symbolic features")
 parser.add_argument(
@@ -106,6 +106,11 @@ parser.add_argument(
 )
 parser.add_argument(
     "--value_learning-rate", type=float, metavar="α", help="Learning rate"
+)
+parser.add_argument(
+    "--temperature",
+    type=float,
+    help="Entropy coefficient",
 )
 parser.add_argument(
     "--learning-rate-schedule",

@@ -56,6 +56,8 @@ class DistShiftMinigrid(gymnasium.Env):
         self.lava_hits = 0
         self.max_episode_steps = max_episode_steps
 
+        self.prev_step = []
+
     def reset(self, seed=None, options=None):
         self._t = 0
         self.wall_hits = 0
@@ -77,40 +79,40 @@ class DistShiftMinigrid(gymnasium.Env):
         x, y = self._env_partial.agent_pos
         rx, ry = self._env.relative_coords(x, y)
 
-        violation = 0
+        reward = 0
+        done, hit_wall, hit_lava, idle, reach_goal = False, False, False, False, False
+        if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
+            self.lava_hits += 1
+            reward = -0.1
+            hit_lava = True
 
-        done = False
-        reward = -0.01
+        self.prev_step.append(action)
+        self.prev_step = self.prev_step[-4:]
+        if len(self.prev_step) == 4 and 2 not in self.prev_step:
+            idle = True
 
         if action == 2:
-            hit_wall = isinstance(fwd_cell, Wall)
-            hit_lava = isinstance(fwd_cell, Lava)
-
-            if hit_lava:
-                self.lava_hits += 1
-                violation = 1
-                reward = -0.25
-                if self._lava_death:
-                    done = True
-
-            elif hit_wall:
+            if isinstance(fwd_cell, Wall):
+                hit_wall = True
                 self.wall_hits += 1
-                violation = 1
 
             # Replaces current position with object
             if fwd_cell is not None:
                 partial_obs[rx, ry] = fwd_cell.encode()[0]
 
             if isinstance(fwd_cell, Goal):
+                reach_goal = True
                 done = True
                 reward = 1
-
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
 
         flattened_obs = partial_obs.reshape(1, -1)
         obs["image"] = flattened_obs
-        info["violation"] = violation
+
+        info["violation"] = np.array(
+            [hit_wall, hit_lava, reach_goal], dtype=np.int32
+        ).reshape(1, -1)
 
         return obs, reward, done, False, info
 
@@ -127,6 +129,14 @@ class DistShiftMinigrid(gymnasium.Env):
     @property
     def action_size(self):
         return self.action_space.n.item()
+
+    @property
+    def violation_size(self):
+        return 3
+
+    @property
+    def violation_keys(self):
+        return ["hit_wall", "hit_lava", "reach_goal"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):

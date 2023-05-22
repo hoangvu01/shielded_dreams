@@ -1,22 +1,11 @@
-from collections import defaultdict
 import os
-import random
-import time
-import numpy as np
-import yaml
-from pathlib import Path
 
 import torch
 from torch import nn, optim
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
-from torchvision.utils import make_grid, save_image
-from tqdm import tqdm
 
-from config import parser
-from environments.env import Env, EnvBatcher
-from environments.memory import ExperienceReplay
 from agent.models import (
     bottle,
     Encoder,
@@ -27,10 +16,10 @@ from agent.models import (
     ActorModel,
     ViolationModel,
 )
-from shields.bps import BoundedPrescienceShield, ShieldBatcher
+from shields.bpemcts import EntropyMCTSShield
+from shields.bpmcts import BoundedPrescienceMCTSShield
+from shields.bps import BoundedPrescienceShield
 from utils import (
-    lineplot,
-    write_video,
     imagine_ahead,
     lambda_return,
     FreezeParameters,
@@ -42,6 +31,8 @@ def weighted_bce_loss(target, pred):
     output_dim = target.size(-1)
     positives = target.sum(axis=0)
     negatives = target.numel() / output_dim - positives
+    
+    positives = torch.where(positives == 0, negatives, positives)
     weights = torch.ones_like(target) + target * (negatives / positives - 1)
     return F.binary_cross_entropy(pred, target, weight=weights, reduction="none")
 
@@ -245,11 +236,14 @@ class Dreamer:
         )
 
     def build_shield(self):
-        shield = BoundedPrescienceShield(
+        shield = EntropyMCTSShield(
             self.transition_model,
             self.violation_model,
+            self.observation_model,
+            depth=self._c.planning_horizon,
             violation_threshold=self._c.violation_threshold,
             paths_to_sample=self._c.paths_to_sample,
+            discount=self._c.violation_discount,
         )
         return shield
 
@@ -266,7 +260,6 @@ class Dreamer:
             posterior_states,
             posterior_means,
             posterior_std_devs,
-            posterior_nonterminals,
         ) = self.transition_model(
             init_state,
             actions[:-1],
@@ -290,10 +283,6 @@ class Dreamer:
             rewards[:-1],
             reduction="none",
         ).mean(dim=(0, 1))
-
-        # terminal_loss = weighted_bce_loss(
-        #     nonterminals[:-1], posterior_nonterminals
-        # ).mean()
 
         violation_loss = weighted_bce_loss(
             violations[:-1].reshape(-1, self._env.violation_size),
@@ -327,13 +316,7 @@ class Dreamer:
                 Normal(posterior_means, posterior_std_devs), global_prior
             ).sum(dim=2).mean(dim=(0, 1))
 
-        model_loss = (
-            observation_loss
-            + reward_loss
-            + kl_loss
-            + violation_loss
-            # + 0.01 * terminal_loss
-        )
+        model_loss = observation_loss + reward_loss + kl_loss + violation_loss
         # Update model parameters
         self.model_opt.zero_grad()
         model_loss.backward()
@@ -350,6 +333,7 @@ class Dreamer:
                 actor_beliefs,
                 self.actor_model,
                 self.transition_model,
+                self.build_shield(),
                 self._c.planning_horizon,
             )
         (
@@ -358,10 +342,7 @@ class Dreamer:
             imged_prior_means,
             imged_prior_std_devs,
             imged_entropies,
-            imged_nonterminals,
         ) = imagination_traj
-
-        imged_nonterminals = torch.cumprod(imged_nonterminals.squeeze(-1), dim=0)
 
         with FreezeParameters(self.model_modules + self.value_model.modules):
             imged_reward = bottle(
@@ -371,16 +352,17 @@ class Dreamer:
         returns = lambda_return(
             imged_reward,
             value_pred,
-            imged_nonterminals,
             bootstrap=value_pred[-1],
             discount=self._c.discount,
             lambda_=self._c.disclam,
         )
 
-        actor_loss = (
-            -returns.sum(dim=0).mean()
-            # - self._c.entropy_coefficient * imged_entropies.sum(dim=0).mean()
+        entropies = (
+            torch.cumprod(torch.full_like(returns, self._c.discount), dim=0)
+            * self._c.temperature
+            * imged_entropies
         )
+        actor_loss = -returns.sum(dim=0).mean() - entropies.sum(dim=0).mean()
         # Update model parameters
         self.actor_opt.zero_grad()
         actor_loss.backward()
@@ -426,7 +408,7 @@ class Dreamer:
     ):
         # Infer belief over current state q(s_t|o≤t,a<t) from the history
         # Action and observation need extra time dimension
-        belief, _, _, _, posterior_state, _, _, _ = self.transition_model(
+        belief, _, _, _, posterior_state, _, _ = self.transition_model(
             state,
             action.unsqueeze(dim=0),
             belief,
@@ -437,15 +419,7 @@ class Dreamer:
         belief = belief.squeeze(dim=0)
         posterior_state = posterior_state.squeeze(0)
 
-        action = self.actor_model.get_action(belief, posterior_state, det=not (explore))
-        if explore:
-            # Add gaussian exploration noise on top of the sampled action
-            probs = torch.softmax(action, 1, dtype=torch.float32)
-            noise = Normal(probs, self._action_noise).rsample()
-            action += noise
-
-            self._action_noise = max(
-                self._action_noise * self._c.action_noise_decay,
-                self._c.action_noise_min,
-            )
+        action, entropies = self.actor_model.get_action(
+            belief, posterior_state, det=not (explore)
+        )
         return belief, posterior_state, action

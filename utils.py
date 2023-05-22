@@ -8,6 +8,7 @@ import torch
 from torch.nn import functional as F
 from typing import Iterable
 from torch.nn import Module
+from torch import nn
 
 
 # Plots min, max and mean + standard deviation bars of a population over time
@@ -103,7 +104,7 @@ def write_video(frames, title, path=""):
 
 
 def imagine_ahead(
-    prev_state, prev_belief, policy, transition_model, planning_horizon=12
+    prev_state, prev_belief, policy, transition_model, shield, planning_horizon=12
 ):
     """
     imagine_ahead is the function to draw the imaginary tracjectory using the dynamics model, actor, critic.
@@ -113,8 +114,7 @@ def imagine_ahead(
     """
     # Create lists for hidden states (cannot use single tensor as buffer because autograd won't work with inplace writes)
     T = planning_horizon
-    beliefs, prior_states, prior_means, prior_std_devs, entropies, nonterminals = (
-        [torch.empty(0)] * T,
+    beliefs, prior_states, prior_means, prior_std_devs, entropies = (
         [torch.empty(0)] * T,
         [torch.empty(0)] * T,
         [torch.empty(0)] * T,
@@ -125,8 +125,10 @@ def imagine_ahead(
     # Loop over time sequence
     for t in range(T - 1):
         _state = prior_states[t]
-        actions_logits = policy.get_action(beliefs[t].detach(), _state.detach())
-        actions_probs = torch.softmax(actions_logits, dim=1)
+        actions_logits, actions_entropies = policy.get_action(
+            beliefs[t].detach(), _state.detach()
+        )
+
         actions = F.one_hot(
             torch.argmax(actions_logits, dim=1),
             num_classes=actions_logits.size(1),
@@ -149,14 +151,7 @@ def imagine_ahead(
         prior_states[t + 1] = prior_means[t + 1] + prior_std_devs[
             t + 1
         ] * torch.randn_like(prior_means[t + 1])
-        entropies[t + 1] = torch.distributions.Categorical(
-            probs=actions_probs
-        ).entropy()
-        nonterminals[t + 1] = torch.round(
-            transition_model.fc_nonterminal(
-                torch.cat([beliefs[t + 1], prior_states[t + 1]], dim=1)
-            )
-        )
+        entropies[t + 1] = actions_entropies
 
     # Return new hidden states
     # imagined_traj = [beliefs, prior_states, prior_means, prior_std_devs]
@@ -166,14 +161,11 @@ def imagine_ahead(
         torch.stack(prior_means[1:], dim=0),
         torch.stack(prior_std_devs[1:], dim=0),
         torch.stack(entropies[1:], dim=0),
-        torch.stack(nonterminals[1:], dim=0),
     ]
     return imagined_traj
 
 
-def lambda_return(
-    imged_reward, value_pred, nonterminals, bootstrap, discount=0.99, lambda_=0.95
-):
+def lambda_return(imged_reward, value_pred, bootstrap, discount=0.99, lambda_=0.95):
     # Setting lambda=1 gives a discounted Monte Carlo return.
     # Setting lambda=0 gives a fixed 1-step return.
     next_values = torch.cat([value_pred[1:], bootstrap[None]], 0)
@@ -192,8 +184,6 @@ def lambda_return(
     outputs = torch.stack(outputs, 0)
     returns = outputs
 
-    # discounts = torch.cumprod(nonterminals * lambda_, dim=0) * lambda_
-    # returns = inputs * discounts * bootstrap
     return returns
 
 
@@ -257,3 +247,19 @@ class FreezeParameters:
     def __exit__(self, exc_type, exc_val, exc_tb):
         for i, param in enumerate(get_parameters(self.modules)):
             param.requires_grad = self.param_states[i]
+
+
+def build_dense_model(
+    feature_size: int,
+    output_size: int,
+    hidden_size: int,
+    layers: int = 3,
+    activation=nn.ELU,
+):
+    model = [nn.Linear(feature_size, hidden_size)]
+    model += [activation()]
+    for _ in range(layers - 1):
+        model += [nn.Linear(hidden_size, hidden_size)]
+        model += [activation()]
+    model += [nn.Linear(hidden_size, output_size)]
+    return nn.Sequential(*model)

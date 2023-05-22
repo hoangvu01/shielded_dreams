@@ -1,6 +1,11 @@
 import math
 from collections import defaultdict
-from agent.models import ActorModel, TransitionModel, ViolationModel
+from agent.models import (
+    ActorModel,
+    SymbolicObservationModel,
+    TransitionModel,
+    ViolationModel,
+)
 import torch
 import torch.nn.functional as F
 from .shield import Shield
@@ -8,7 +13,13 @@ from .shield import Shield
 
 class Node:
     def __init__(
-        self, belief, state, transition_model, violation_model, actor_model
+        self,
+        belief,
+        state,
+        transition_model,
+        violation_model,
+        actor_model,
+        observation_model,
     ) -> None:
         self.belief = belief
         self.state = state
@@ -16,6 +27,7 @@ class Node:
         self.transition_model = transition_model
         self.violation_model = violation_model
         self.actor_model = actor_model
+        self.observation_model = observation_model
 
     def is_terminal(self):
         violations = self.violation_model(self.belief, self.state).squeeze(0)
@@ -37,6 +49,7 @@ class Node:
             self.transition_model,
             self.violation_model,
             self.actor_model,
+            self.observation_model,
         )
 
     def find_children(self):
@@ -64,16 +77,23 @@ class Node:
                 self.transition_model,
                 self.violation_model,
                 self.actor_model,
+                self.observation_model,
             )
             for b, s in zip(beliefs, states)
         ]
 
     def reward(self):
         violations = self.violation_model(self.belief, self.state).squeeze()
-        reach_goal = violations[-1] > 0.5
-        violations = violations[:-1] > 0.5
+        reach_goal = (violations[-1] > 0.5).int()
+        violations = (violations[:-1] > 0.5).sum()
 
-        return (reach_goal.int() - violations.sum()).item()
+        _, entropies = self.actor_model.get_action(self.belief, self.state, det=False)
+        entropy = entropies.sum()
+
+        std = self.observation_model.std(self.belief, self.state)
+        uncertainty = torch.linalg.vector_norm(std)
+
+        return violations.item(), entropy.item(), uncertainty.item(), reach_goal.item()
 
     def __eq__(self, __value: object) -> bool:
         if isinstance(__value, Node):
@@ -83,33 +103,47 @@ class Node:
         return hash((self.belief, self.state))
 
 
-class BoundedPrescienceMCTSShield(Shield):
+class EntropyMCTSShield(Shield):
     def __init__(
         self,
         transition_model: TransitionModel,
         violation_model: ViolationModel,
+        observation_model: SymbolicObservationModel,
         depth=5,
         violation_threshold=1,
         paths_to_sample=1,
-        exploration_weight=2,
+        exploration_weight=1,
         discount=0.5,
     ):
         self.transition_model = transition_model
         self.violation_model = violation_model
+        self.observation_model = observation_model
 
         self.depth = depth
         self.violation_threshold = violation_threshold
         self.paths_to_sample = paths_to_sample
 
-        self.Q = defaultdict(int)
         self.N = defaultdict(int)
+        self.V = defaultdict(float)
+        self.E = defaultdict(float)
+        self.U = defaultdict(float)
+        self.K = defaultdict(float)
+        self.G = defaultdict(int)
+
         self.children = dict()
         self.exploration_weight = exploration_weight
         self.discount = discount
 
-    def step(self, belief, state, action, policy):
+    def step(self, belief, state, action, policy, t):
         "Choose the best successor of node. (Choose a move in the game)"
-        node = Node(belief, state, self.transition_model, self.violation_model, policy)
+        node = Node(
+            belief,
+            state,
+            self.transition_model,
+            self.violation_model,
+            policy,
+            self.observation_model,
+        )
         if node.is_terminal():
             return action, False
 
@@ -120,34 +154,30 @@ class BoundedPrescienceMCTSShield(Shield):
             _, node = node.find_random_child()
             return action, False
 
-        def score(n):
-            if self.N[n] == 0:
-                return float("-inf")  # avoid unseen moves
-            return self.Q[n] / self.N[n]  # average reward
-
-        scores = [score(n) for n in self.children[node]]
-        chosen_action = action.squeeze(0).argmax().item()
-        if scores[chosen_action] > self.violation_threshold:
-            return action, False
-
+        scores = [self._score(n) for n in self.children[node]]
         scores = torch.tensor(scores).unsqueeze(0)
-        mask = scores > self.violation_threshold
-        if mask.sum().item() == 0:
-            return scores, True
 
-        masked_actions = torch.where(mask, action, torch.full_like(action, -10.0))
-        return masked_actions, True
+        weighted_scores = torch.softmax(scores, dim=1)
+        weighted_action = torch.softmax(action, dim=1)
+        # print(scores, weighted_scores, action, weighted_action)
+        alpha = math.exp(-0.01 * t)
+        return (1 - alpha) * weighted_action + alpha * weighted_scores, True
 
     def do_rollout(self, node):
         path = self._select(node)
         leaf = path[-1]
         self._expand(leaf)
-        reward = self._simulate(leaf)
-        self._backpropagate(path, reward)
+        attrs = self._simulate(leaf)
+        self._backpropagate(path, *attrs)
+
+    def _score(self, n):
+        novelty = math.exp(-self.N[n])
+        safety = (self.G[n] + 0.01 * self.U[n] - self.V[n]) / self.N[n]
+        return safety
 
     def _select(self, node):
         path = []
-        while True:
+        while len(path) < 5:
             path.append(node)
             if node not in self.children or not self.children[node]:
                 return path
@@ -156,43 +186,66 @@ class BoundedPrescienceMCTSShield(Shield):
                 n = unexplored.pop()
                 path.append(n)
                 return path
-            node = self._uct_select(node)
+            node = self._explore_select(node)
+        return path
 
     def _expand(self, node):
         if node in self.children:
             return
         self.children[node] = node.find_children()
 
-    def _simulate(self, node):
-        step = 0
-        reward = 0
-        while step < self.depth:
-            r = node.reward()
-            reward += r * self.discount**step
+    def _simulate(self, root):
+        violations = 0
+        entropies = 0
+        uncert = 0
+        goal = 0
 
-            if node.is_terminal() or r < 0:
+        step = 0
+        node = root
+
+        while step < self.depth:
+            v, e, u, g = node.reward()
+            violations += v * self.discount**step
+            uncert += u * self.discount**step
+            entropies += e * self.discount**step
+            goal += g * self.discount**step
+
+            if node.is_terminal():
                 break
 
             _, node = node.find_random_child()
             step += 1
 
-        return reward
+        return (violations, entropies, uncert, goal)
 
-    def _backpropagate(self, path, reward):
-        r = reward
+    def _backpropagate(self, path, violation, entropy, uncert, goal):
+        e = entropy
+        v = violation
+        g = goal
+        u = uncert
+
         for node in reversed(path):
-            self.N[node] += 1
-            self.Q[node] += r
-            r = (r + node.reward()) * self.discount
+            nv, ne, nu, ng = node.reward()
 
-    def _uct_select(self, node):
+            self.N[node] += 1
+            self.V[node] += v
+            self.E[node] += e
+            self.U[node] += u
+            self.K[node] += math.exp(-0.01 * u) * v
+            self.G[node] += goal
+
+            e = (ne + e) * self.discount
+            v = (nv + v) * self.discount
+            g = (ng + g) * self.discount
+            u = (nu + u) * self.discount
+
+    def _explore_select(self, node):
         assert all(n in self.children for n in self.children[node])
 
         log_N_vertex = math.log(self.N[node])
 
-        def uct(n):
-            return self.Q[n] / self.N[n] + self.exploration_weight * math.sqrt(
-                log_N_vertex / self.N[n]
-            )
+        def score(n):
+            base = self._score(n)
+            return base + self.exploration_weight * math.sqrt(log_N_vertex / self.N[n])
 
-        return max(self.children[node], key=uct)
+        return max(self.children[node], key=score)

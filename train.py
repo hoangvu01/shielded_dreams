@@ -1,44 +1,17 @@
-import argparse
 import os
-import time
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 import torch
 import yaml
-from torch import nn, optim
-from torch.distributions import Normal
-from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-from agent.models import (
-    ActorModel,
-    Encoder,
-    ObservationModel,
-    RewardModel,
-    TransitionModel,
-    ValueModel,
-    ViolationModel,
-    bottle,
-)
-from agent.planner import MPCPlanner
 from config import parser
 from dreamer import Dreamer
-from environments.env import Env, EnvBatcher
+from environments.env import Env
 from environments.memory import ExperienceReplay
-from shields.bps import BoundedPrescienceShield, ShieldBatcher
-from utils import (
-    ActivateParameters,
-    FreezeParameters,
-    imagine_ahead,
-    lambda_return,
-    lineplot,
-    write_video,
-)
 
 # Hyper parameters
 args = parser.parse_args()
@@ -47,10 +20,6 @@ with open(args.path, "r") as fp:
     defaults = yaml.safe_load(fp)
     parser.set_defaults(**defaults)
     args = parser.parse_args()
-
-args.overshooting_distance = min(
-    args.chunk_size, args.overshooting_distance
-)  # Overshooting distance cannot be greater than chunk size
 
 print(" " * 10 + "Options")
 for k, v in vars(args).items():
@@ -97,7 +66,7 @@ if not args.test:
     # Initialise dataset D with S random seed episodes
     for s in range(1, args.seed_episodes + 1):
         violation_count = 0
-        observation, _ = env.reset()
+        observation, _ = env.reset(seed=args.env_seed)
         observation = torch.tensor(observation, dtype=torch.float32)
 
         done, t = False, 0
@@ -165,13 +134,20 @@ for episode in (
         shield = agent.build_shield()
         violations, total_reward = 0, 0
 
-        observation, _ = env.reset()
+        sim_env = Env(
+            args.env,
+            args.max_episode_length,
+            args.action_repeat,
+            args.bit_depth,
+            args.render,
+        )
+        observation, _ = sim_env.reset(seed=args.env_seed)
         observation = torch.tensor(observation, dtype=torch.float32)
 
         belief, posterior_state = agent.build_initial_params(1)
         action, violation = (
-            torch.zeros(1, env.action_size),
-            torch.zeros(1, env.violation_size),
+            torch.zeros(1, sim_env.action_size),
+            torch.zeros(1, sim_env.violation_size),
         )
 
         for s in (dbar := tqdm(range(args.max_episode_length // args.action_repeat))):
@@ -179,17 +155,20 @@ for episode in (
             belief, posterior_state, action = agent.policy(
                 belief, posterior_state, action, observation, explore=True
             )
-
+            
             shield_action, shield_interfered = shield.step(
-                belief,
-                posterior_state,
-                action,
-                agent.actor_model,
+                belief, posterior_state, action, agent.actor_model, episode
             )
-            # action = shield_action
+            dbar.set_postfix(
+                interfered=shield_interfered,
+                a=action.argmax().item(),
+                s=shield_action.argmax().item(),
+            )
+            if episode % args.shield_interval == 0 and shield_interfered:
+                action = shield_action
 
             # Perform environment step (action repeats handled internally)
-            next_observation, reward, done, _, info = env.step(action.cpu())
+            next_observation, reward, done, _, info = sim_env.step(action.cpu())
             next_observation = torch.tensor(next_observation, dtype=torch.float32)
             violation = info["violation"]
 
@@ -200,10 +179,16 @@ for episode in (
 
             violations += violation.sum()
             if args.render:
-                env.render()
+                sim_env.render()
             if done:
                 dbar.close()
+                sim_env.close()
                 break
+        tqdm.write(
+            "simulation episode, reward: {}, violations: {}".format(
+                total_reward, violations
+            )
+        )
 
         # Update and plot train reward metrics
         metrics["steps"].append(s + metrics["steps"][-1])
@@ -215,7 +200,6 @@ for episode in (
     if episode % args.test_interval == 0:
         # Initialise parallelised test environments
         agent.set_eval()
-        shield = agent.build_shield()
 
         test_env = Env(
             args.env,
@@ -227,9 +211,10 @@ for episode in (
 
         with torch.no_grad():
             for t in (tbar := tqdm(range(args.test_episodes))):
+                shield = agent.build_shield()
                 total_violations, total_reward = 0, 0
 
-                observation, _ = test_env.reset()
+                observation, _ = test_env.reset(seed=args.env_seed)
                 observation = torch.tensor(observation, dtype=torch.float32)
 
                 belief, posterior_state = agent.build_initial_params(1)
@@ -243,14 +228,6 @@ for episode in (
                     belief, posterior_state, action = agent.policy(
                         belief, posterior_state, action, observation, explore=False
                     )
-
-                    shield_action, shield_interfered = shield.step(
-                        belief,
-                        posterior_state,
-                        action,
-                        agent.actor_model,
-                    )
-                    # action = shield_action
 
                     # Perform environment step (action repeats handled internally)
                     observation, reward, done, _, info = test_env.step(action.cpu())
@@ -271,14 +248,7 @@ for episode in (
 
             test_env.close()
             tbar.close()
-            tqdm.write(
-                "episodes: {}, total_steps: {}, train_reward: {}, violations: {} ".format(
-                    metrics["episodes"][-1],
-                    metrics["steps"][-1],
-                    metrics["train_rewards"][-1],
-                    metrics["violation_count"][-1][1],
-                )
-            )
+
         torch.save(metrics, os.path.join(results_dir, "metrics.pth"))
 
     agent.write_summaries()

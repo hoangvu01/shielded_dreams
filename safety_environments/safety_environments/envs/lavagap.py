@@ -56,6 +56,8 @@ class LavaGapMinigrid(gymnasium.Env):
         self.lava_hits = 0
         self.max_episode_steps = max_episode_steps
 
+        self.prev_step = []
+
     def reset(self, seed=None, options=None):
         self._t = 0
         self.wall_hits = 0
@@ -78,11 +80,16 @@ class LavaGapMinigrid(gymnasium.Env):
         rx, ry = self._env.relative_coords(x, y)
 
         reward = 0
-        done, hit_wall, hit_lava = False, False, False
+        done, hit_wall, hit_lava, idle, reach_goal = False, False, False, False, False
         if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
             self.lava_hits += 1
             reward = -0.1
             hit_lava = True
+
+        self.prev_step.append(action)
+        self.prev_step = self.prev_step[-4:]
+        if len(self.prev_step) == 4 and 2 not in self.prev_step:
+            idle = True
 
         if action == 2:
             if isinstance(fwd_cell, Wall):
@@ -94,6 +101,7 @@ class LavaGapMinigrid(gymnasium.Env):
                 partial_obs[rx, ry] = fwd_cell.encode()[0]
 
             if isinstance(fwd_cell, Goal):
+                reach_goal = True
                 done = True
                 reward = 1
         elif cur_cell is not None:
@@ -102,7 +110,9 @@ class LavaGapMinigrid(gymnasium.Env):
         flattened_obs = partial_obs.reshape(1, -1)
         obs["image"] = flattened_obs
 
-        info["violation"] = np.array([hit_wall, hit_lava], dtype=np.int_).reshape(1, -1)
+        info["violation"] = np.array(
+            [hit_wall, hit_lava, idle, reach_goal], dtype=np.int32
+        ).reshape(1, -1)
 
         return obs, reward, done, False, info
 
@@ -122,11 +132,11 @@ class LavaGapMinigrid(gymnasium.Env):
 
     @property
     def violation_size(self):
-        return 2
+        return 4
 
     @property
     def violation_keys(self):
-        return ["hit_wall", "hit_lava"]
+        return ["hit_wall", "hit_lava", "idle", "reach_goal"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
