@@ -398,15 +398,15 @@ class ActorModel(jit.ScriptModule):
 
         probs = torch.softmax(actions, dim=1)
         entropies = -torch.sum(probs * probs.log(), dim=1)
-        # print(
-        #     actions,
-        #     action_mean,
-        #     action_std,
-        #     probs,
-        #     entropies,
-        #     self._init_std_w,
-        #     sep="\n",
-        # )
+        print(
+            actions,
+            action_mean,
+            action_std,
+            probs,
+            entropies,
+            self._init_std_w,
+            sep="\n",
+        )
         return actions, entropies
 
 

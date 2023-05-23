@@ -127,12 +127,20 @@ class EntropyMCTSShield(Shield):
         self.V = defaultdict(float)
         self.E = defaultdict(float)
         self.U = defaultdict(float)
-        self.K = defaultdict(float)
+        self.K = defaultdict(lambda: 100.0)
         self.G = defaultdict(int)
 
         self.children = dict()
         self.exploration_weight = exploration_weight
         self.discount = discount
+
+    def clear(self):
+        self.N.clear()
+        self.V.clear()
+        self.E.clear()
+        self.U.clear()
+        self.K.clear()
+        self.G.clear()
 
     def step(self, belief, state, action, policy, t):
         "Choose the best successor of node. (Choose a move in the game)"
@@ -159,7 +167,10 @@ class EntropyMCTSShield(Shield):
 
         weighted_scores = torch.softmax(scores, dim=1)
         weighted_action = torch.softmax(action, dim=1)
+
+        debug = [(self.U[n], self.V[n], self.K[n]) for n in self.children[node]]
         # print(scores, weighted_scores, action, weighted_action)
+        # print(debug)
         alpha = math.exp(-0.01 * t)
         return (1 - alpha) * weighted_action + alpha * weighted_scores, True
 
@@ -172,8 +183,8 @@ class EntropyMCTSShield(Shield):
 
     def _score(self, n):
         novelty = math.exp(-self.N[n])
-        safety = (self.G[n] + 0.01 * self.U[n] - self.V[n]) / self.N[n]
-        return safety
+        safety = self.G[n] + 0.01 * self.U[n] - self.V[n]
+        return safety / self.N[n] + novelty + 0.01 * self.K[n]
 
     def _select(self, node):
         path = []
@@ -203,20 +214,28 @@ class EntropyMCTSShield(Shield):
         step = 0
         node = root
 
-        while step < self.depth:
-            v, e, u, g = node.reward()
-            violations += v * self.discount**step
-            uncert += u * self.discount**step
-            entropies += e * self.discount**step
-            goal += g * self.discount**step
+        num_sims = 3
 
-            if node.is_terminal():
-                break
+        for _ in range(num_sims):
+            while step < self.depth:
+                v, e, u, g = node.reward()
+                violations += math.exp(-0.01 * u) * v * self.discount**step
+                uncert += u * self.discount**step
+                entropies += e * self.discount**step
+                goal += g * self.discount**step
 
-            _, node = node.find_random_child()
-            step += 1
+                if node.is_terminal():
+                    break
 
-        return (violations, entropies, uncert, goal)
+                _, node = node.find_random_child()
+                step += 1
+
+        return (
+            violations / num_sims,
+            entropies / num_sims,
+            uncert / num_sims,
+            goal / num_sims,
+        )
 
     def _backpropagate(self, path, violation, entropy, uncert, goal):
         e = entropy
@@ -231,7 +250,7 @@ class EntropyMCTSShield(Shield):
             self.V[node] += v
             self.E[node] += e
             self.U[node] += u
-            self.K[node] += math.exp(-0.01 * u) * v
+            self.K[node] = min(self.K[node], v)
             self.G[node] += goal
 
             e = (ne + e) * self.discount

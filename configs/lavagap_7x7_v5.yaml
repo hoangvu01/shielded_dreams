@@ -17,18 +17,18 @@ max_episode_length: 50
 cnn_activation_function: "relu"
 dense_activation_function: "elu"
 actor_distribution: "tanh_normal"
-embedding_size: 64
+embedding_size: 32
 hidden_size: 128
-belief_size: 64
+belief_size: 96
 state_size: 16
 
 global_kl_beta: 0
 free_nats: 5
 
 model_learning_rate: 0.0001
-actor_learning_rate: 0.0001
-value_learning_rate: 0.0001
-violation_learning_rate: 0.0001
+actor_learning_rate: 0.00001
+value_learning_rate: 0.00001
+violation_learning_rate: 0.00001
 learning_rate_schedule: 0
 adam_epsilon: 0.000001
 
@@ -47,12 +47,12 @@ batch_size: 32
 chunk_size: 16
 
 planning_horizon: 5
-paths_to_sample: 12
+paths_to_sample: 10
 discount: 0.95
 disclam: 0.95
 
 violation_discount: 0.75
-shield_interval: 3
+shield_interval: 2
 
 checkpoint_interval: 50
 checkpoint_experience: False

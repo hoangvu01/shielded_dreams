@@ -73,23 +73,23 @@ with torch.no_grad():
                 belief, posterior_state, action, observation, explore=True
             )
 
-            shield_action, shield_interfered = shield.step(
-                belief,
-                posterior_state,
-                action,
-                agent.actor_model,
-                300
-            )
-            action = shield_action
+            # shield_action, shield_interfered = shield.step(
+            #     belief,
+            #     posterior_state,
+            #     action,
+            #     agent.actor_model,
+            #     300
+            # )
+            # action = shield_action
 
             # Perform environment step (action repeats handled internally)
-            pbar.set_postfix(
-                r=total_reward,
-                v=total_violations,
-                interfered=shield_interfered,
-                action=action.argmax().item(),
-                shield=shield_action.argmax().item(),
-            )
+            # pbar.set_postfix(
+            #     r=total_reward,
+            #     v=total_violations,
+            #     interfered=shield_interfered,
+            #     action=action.argmax().item(),
+            #     shield=shield_action.argmax().item(),
+            # )
             input("Continue")
             observation, reward, done, _, info = env.step(action.cpu())
             observation = torch.tensor(observation, dtype=torch.float32)
