@@ -9,6 +9,10 @@ MINIGRID_ENVS = [
     "DistShift1-Relaxed",
     "DistShift2",
     "DistShift2-Relaxed",
+    "LavaCrossingS9N1-Relaxed",
+    "LavaCrossingS9N2-Relaxed",
+    "LavaCrossingS9N3-Relaxed",
+    "LavaCrossingS11N5-Relaxed",
 ]
 
 gymnasium.register(
@@ -79,6 +83,46 @@ gymnasium.register(
     entry_point="safety_environments.envs:DistShiftMinigrid",
     kwargs={
         "version": 2,
+        "lava_death": False,
+    },
+)
+
+gymnasium.register(
+    "LavaCrossingS9N1-Relaxed",
+    entry_point="safety_environments.envs:CrossingMinigrid",
+    kwargs={
+        "grid_size": 9,
+        "num_crossing": 1,
+        "lava_death": False,
+    },
+)
+
+gymnasium.register(
+    "LavaCrossingS9N2-Relaxed",
+    entry_point="safety_environments.envs:CrossingMinigrid",
+    kwargs={
+        "grid_size": 9,
+        "num_crossing": 2,
+        "lava_death": False,
+    },
+)
+
+gymnasium.register(
+    "LavaCrossingS9N3-Relaxed",
+    entry_point="safety_environments.envs:CrossingMinigrid",
+    kwargs={
+        "grid_size": 9,
+        "num_crossing": 3,
+        "lava_death": False,
+    },
+)
+
+gymnasium.register(
+    "LavaCrossingS11N5-Relaxed",
+    entry_point="safety_environments.envs:CrossingMinigrid",
+    kwargs={
+        "grid_size": 11,
+        "num_crossing": 6,
         "lava_death": False,
     },
 )

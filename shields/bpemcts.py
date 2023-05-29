@@ -84,8 +84,8 @@ class Node:
 
     def reward(self):
         violations = self.violation_model(self.belief, self.state).squeeze()
-        reach_goal = (violations[-1] > 0.5).int()
-        violations = (violations[:-1] > 0.5).sum()
+        reach_goal = violations[-1].sum()
+        violations = violations[:-1].sum()
 
         _, entropies = self.actor_model.get_action(self.belief, self.state, det=False)
         entropy = entropies.sum()
@@ -114,6 +114,7 @@ class EntropyMCTSShield(Shield):
         paths_to_sample=1,
         exploration_weight=1,
         discount=0.5,
+        sensitivity=0.75,
     ):
         self.transition_model = transition_model
         self.violation_model = violation_model
@@ -127,12 +128,13 @@ class EntropyMCTSShield(Shield):
         self.V = defaultdict(float)
         self.E = defaultdict(float)
         self.U = defaultdict(float)
-        self.K = defaultdict(lambda: 100.0)
+        self.K = defaultdict(float)
         self.G = defaultdict(int)
 
         self.children = dict()
         self.exploration_weight = exploration_weight
         self.discount = discount
+        self.sensitivity = sensitivity
 
     def clear(self):
         self.N.clear()
@@ -168,11 +170,16 @@ class EntropyMCTSShield(Shield):
         weighted_scores = torch.softmax(scores, dim=1)
         weighted_action = torch.softmax(action, dim=1)
 
-        debug = [(self.U[n], self.V[n], self.K[n]) for n in self.children[node]]
+        # debug = [
+        #     (self.V[n], self.U[n], self.K[n], self.E[n], self.N[n])
+        #     for n in self.children[node]
+        # ]
         # print(scores, weighted_scores, action, weighted_action)
         # print(debug)
-        alpha = math.exp(-0.01 * t)
-        return (1 - alpha) * weighted_action + alpha * weighted_scores, True
+        alpha = max(math.exp(-0.001 * t), 0.1)
+        return (
+            1 - self.sensitivity
+        ) * weighted_action + self.sensitivity * alpha * weighted_scores, True
 
     def do_rollout(self, node):
         path = self._select(node)
@@ -182,9 +189,13 @@ class EntropyMCTSShield(Shield):
         self._backpropagate(path, *attrs)
 
     def _score(self, n):
-        novelty = math.exp(-self.N[n])
-        safety = self.G[n] + 0.01 * self.U[n] - self.V[n]
-        return safety / self.N[n] + novelty + 0.01 * self.K[n]
+        novelty = math.exp(-0.1 * self.N[n])
+        uncertainty_bonus = 0.1 * self.U[n] / self.N[n]
+        safety = -self.V[n] / self.N[n]
+        goal_bonus = self.G[n] / self.N[n]
+        entropy_bonus = math.exp(self.E[n] / self.N[n])
+        # print(novelty, entropy_bonus, uncertainty_bonus, safety, goal_bonus)
+        return novelty + entropy_bonus + uncertainty_bonus + safety + goal_bonus
 
     def _select(self, node):
         path = []
@@ -211,15 +222,15 @@ class EntropyMCTSShield(Shield):
         uncert = 0
         goal = 0
 
-        step = 0
         node = root
 
-        num_sims = 3
+        num_sims = 1
 
         for _ in range(num_sims):
+            step = 0
             while step < self.depth:
                 v, e, u, g = node.reward()
-                violations += math.exp(-0.01 * u) * v * self.discount**step
+                violations += v * self.discount**step
                 uncert += u * self.discount**step
                 entropies += e * self.discount**step
                 goal += g * self.discount**step
@@ -250,7 +261,7 @@ class EntropyMCTSShield(Shield):
             self.V[node] += v
             self.E[node] += e
             self.U[node] += u
-            self.K[node] = min(self.K[node], v)
+            self.K[node] += v * math.exp(-0.1 * ne)
             self.G[node] += goal
 
             e = (ne + e) * self.discount
@@ -265,6 +276,8 @@ class EntropyMCTSShield(Shield):
 
         def score(n):
             base = self._score(n)
-            return base + self.exploration_weight * math.sqrt(log_N_vertex / self.N[n])
+            exploration = self.exploration_weight * math.sqrt(log_N_vertex / self.N[n])
+            # uncertainty = 0.01 * self.exploration_weight * self.U[n] / self.N[n]
+            return base + exploration
 
         return max(self.children[node], key=score)

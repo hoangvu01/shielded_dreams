@@ -179,26 +179,32 @@ class SymbolicObservationModel(jit.ScriptModule):
         self.act_fn = getattr(F, activation_function)
         self.fc1 = nn.Linear(belief_size + state_size, embedding_size)
         self.fc2 = nn.Linear(embedding_size, embedding_size)
-        self.fc3 = nn.Linear(embedding_size, observation_size * 2)
-        self.modules = [self.fc1, self.fc2, self.fc3]
+        self.fc3 = nn.Linear(embedding_size, embedding_size)
 
-    def forward(self, belief, state):
+        self.fc = nn.Linear(embedding_size, observation_size * 2)
+        self.modules = [self.fc1, self.fc2, self.fc3, self.fc]
+
+    def _dist(self, belief, state):
         hidden = self.act_fn(self.fc1(torch.cat([belief, state], dim=1)))
         hidden = self.act_fn(self.fc2(hidden))
-        y = torch.relu(self.fc3(hidden))
+        hidden = self.act_fn(self.fc3(hidden))
+        y = self.fc(hidden)
 
         obs_mean, obs_logvar = torch.chunk(y, 2, dim=1)
+        obs_logvar = F.softplus(obs_logvar)
+
+        return obs_mean, obs_logvar
+
+    def forward(self, belief, state):
+        obs_mean, obs_logvar = self._dist(belief, state)
+
         dist = torch.distributions.Normal(obs_mean, torch.exp(0.5 * obs_logvar))
         dist = torch.distributions.Independent(dist, 1)
         observation = dist.rsample()
         return observation
 
     def std(self, belief, state):
-        hidden = self.act_fn(self.fc1(torch.cat([belief, state], dim=1)))
-        hidden = self.act_fn(self.fc2(hidden))
-        y = torch.relu(self.fc3(hidden))
-
-        _, obs_logvar = torch.chunk(y, 2, dim=1)
+        _, obs_logvar = self._dist(belief, state)
         return torch.exp(0.5 * obs_logvar)
 
 
@@ -261,7 +267,7 @@ class RewardModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
-        reward = self.act_fn(self.fc4(hidden)).squeeze(dim=1)
+        reward = self.fc4(hidden).squeeze(dim=1)
         return reward
 
 
@@ -282,7 +288,6 @@ class ViolationModel(jit.ScriptModule):
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
-        # self.fc6 = nn.Linear(hidden_size, 2)
         self.fc6 = nn.Linear(hidden_size, violation_size)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
@@ -316,11 +321,11 @@ class ValueModel(jit.ScriptModule):
     def forward(self, belief, state):
         x = torch.cat([belief, state], dim=1)
         hidden = self.act_fn(self.fc1(x))
-        # hidden = self.act_fn(self.fc2(hidden))
-        # hidden = self.act_fn(self.fc3(hidden))
-        hidden = self.act_fn(self.fc4(hidden))
-        hidden = self.act_fn(self.fc5(hidden))
-        reward = self.act_fn(self.fc6(hidden)).squeeze(dim=1)
+        hidden = self.act_fn(self.fc2(hidden))
+        hidden = self.act_fn(self.fc3(hidden))
+        # hidden = self.act_fn(self.fc4(hidden))
+        # hidden = self.act_fn(self.fc5(hidden))
+        reward = self.fc6(hidden).squeeze(dim=1)
         return reward
 
 
@@ -376,7 +381,7 @@ class ActorModel(jit.ScriptModule):
         hidden = self.act_fn(self.fc1(x))
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
-        hidden = self.act_fn(self.fc4(hidden))
+        # hidden = self.act_fn(self.fc4(hidden))
         # hidden = self.act_fn(self.fc5(hidden))
         # hidden = self.act_fn(self.fc6(hidden))
         action = self.fc_last(hidden).squeeze(dim=1)
@@ -398,15 +403,15 @@ class ActorModel(jit.ScriptModule):
 
         probs = torch.softmax(actions, dim=1)
         entropies = -torch.sum(probs * probs.log(), dim=1)
-        print(
-            actions,
-            action_mean,
-            action_std,
-            probs,
-            entropies,
-            self._init_std_w,
-            sep="\n",
-        )
+        # print(
+        #     actions,
+        #     action_mean,
+        #     action_std,
+        #     probs,
+        #     entropies,
+        #     self._init_std_w,
+        #     sep="\n",
+        # )
         return actions, entropies
 
 
@@ -423,7 +428,7 @@ class SymbolicEncoder(jit.ScriptModule):
     def forward(self, observation):
         hidden = self.act_fn(self.fc1(observation))
         hidden = self.act_fn(self.fc2(hidden))
-        hidden = self.act_fn(self.fc3(hidden))
+        hidden = self.fc3(hidden)
         return hidden
 
 

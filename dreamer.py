@@ -31,8 +31,10 @@ def weighted_bce_loss(target, pred):
     output_dim = target.size(-1)
     positives = target.sum(axis=0)
     negatives = target.numel() / output_dim - positives
-    
-    positives = torch.where(positives == 0, negatives, positives)
+
+    positives = torch.where(
+        torch.isclose(positives, torch.zeros_like(positives)), negatives, positives
+    )
     weights = torch.ones_like(target) + target * (negatives / positives - 1)
     return F.binary_cross_entropy(pred, target, weight=weights, reduction="none")
 

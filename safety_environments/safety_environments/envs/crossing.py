@@ -8,7 +8,7 @@ from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 from minigrid.core.world_object import Lava, Goal, Wall
 
 
-class LavaGapMinigrid(gymnasium.Env):
+class CrossingMinigrid(gymnasium.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
 
     def __init__(
@@ -18,14 +18,15 @@ class LavaGapMinigrid(gymnasium.Env):
         bit_depth=1,
         render_mode="human",
         screen_size=300,
-        grid_size=5,
+        grid_size=9,
+        num_crossing=3,
         lava_death=False,
     ):
         super().__init__()
 
         # Environment config
         _env = gymnasium.make(
-            f"MiniGrid-LavaGapS{grid_size}-v0",
+            f"MiniGrid-LavaCrossingS{grid_size}N{num_crossing}-v0",
             render_mode=render_mode,
             max_episode_steps=max_episode_steps,
             screen_size=screen_size,
@@ -94,7 +95,6 @@ class LavaGapMinigrid(gymnasium.Env):
         if action == 2:
             if isinstance(fwd_cell, Wall):
                 hit_wall = True
-                reward = -0.1
                 self.wall_hits += 1
 
             # Replaces current position with object
@@ -146,7 +146,7 @@ class LavaGapMinigrid(gymnasium.Env):
 
 
 if __name__ == "__main__":
-    e = LavaGapMinigrid(render_mode="human")
+    e = CrossingMinigrid(render_mode="human")
     e.reset()
     e.render()
     while True:
