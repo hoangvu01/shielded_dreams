@@ -16,6 +16,7 @@ class ExperienceReplay:
         self.rewards = np.empty((size,), dtype=np.float32)
         self.violations = np.empty((size, violation_size), dtype=np.float32)
         self.nonterminals = np.empty((size, 1), dtype=np.float32)
+        self.goals = np.empty((size, 1), dtype=np.float32)
         self.idx = 0
         self.full = False  # Tracks if memory has been filled/all slots are valid
         self.steps, self.episodes = (
@@ -25,12 +26,13 @@ class ExperienceReplay:
         self.bit_depth = bit_depth
         self.violation_count = 0
 
-    def append(self, observation, action, reward, violation, done):
+    def append(self, observation, action, reward, violation, done, goals):
         self.observations[self.idx] = observation.numpy()
         self.actions[self.idx] = action.numpy()
         self.rewards[self.idx] = reward
         self.violations[self.idx] = violation
         self.nonterminals[self.idx] = not done
+        self.goals[self.idx] = goals
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
         self.steps, self.episodes = self.steps + 1, self.episodes + (1 if done else 0)
@@ -56,6 +58,7 @@ class ExperienceReplay:
             self.rewards[vec_idxs].reshape(L, n),
             self.violations[vec_idxs].reshape(L, n, -1),
             self.nonterminals[vec_idxs].reshape(L, n, 1),
+            self.goals[vec_idxs].reshape(L, n, 1)
         )
 
     # Returns a batch of sequence chunks uniformly sampled from the memory

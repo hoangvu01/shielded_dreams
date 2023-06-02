@@ -73,14 +73,14 @@ class LavaGapMinigrid(gymnasium.Env):
         cur_cell = self._env.grid.get(*self._env.agent_pos)
         fwd_cell = self._env.grid.get(*self._env.front_pos)
 
-        obs, env_reward, terminated, truncated, info = self._env.step(action)
+        obs, env_reward, _, truncated, info = self._env.step(action)
         partial_obs = self._env_partial.observation(obs)
 
         x, y = self._env_partial.agent_pos
         rx, ry = self._env.relative_coords(x, y)
 
         reward = 0
-        done, hit_wall, hit_lava, idle, reach_goal = False, False, False, False, False
+        terminated, hit_wall, hit_lava, idle = False, False, False, False
         if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
             self.lava_hits += 1
             reward = -0.1
@@ -102,8 +102,7 @@ class LavaGapMinigrid(gymnasium.Env):
                 partial_obs[rx, ry] = fwd_cell.encode()[0]
 
             if isinstance(fwd_cell, Goal):
-                reach_goal = True
-                done = True
+                terminated = True
                 reward = 1
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
@@ -112,10 +111,10 @@ class LavaGapMinigrid(gymnasium.Env):
         obs["image"] = flattened_obs
 
         info["violation"] = np.array(
-            [hit_wall, hit_lava, idle, reach_goal], dtype=np.int32
+            [hit_wall, hit_lava, idle], dtype=np.int32
         ).reshape(1, -1)
 
-        return obs, reward, done, False, info
+        return obs, reward, terminated, truncated, info
 
     def render(self):
         self._env.render()
@@ -133,11 +132,11 @@ class LavaGapMinigrid(gymnasium.Env):
 
     @property
     def violation_size(self):
-        return 4
+        return 3
 
     @property
     def violation_keys(self):
-        return ["hit_wall", "hit_lava", "idle", "reach_goal"]
+        return ["hit_wall", "hit_lava", "idle"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
@@ -146,7 +145,7 @@ class LavaGapMinigrid(gymnasium.Env):
 
 
 if __name__ == "__main__":
-    e = LavaGapMinigrid(render_mode="human")
+    e = LavaGapMinigrid(render_mode="human", grid_size=7, screen_size=400)
     e.reset()
     e.render()
     while True:

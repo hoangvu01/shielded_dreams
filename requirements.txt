@@ -11,3 +11,5 @@ tensorboard==2.11.2
 pyglet==1.5.27
 minigrid==2.2.0
 pyyaml
+matplotlib
+pandas

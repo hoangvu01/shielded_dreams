@@ -104,7 +104,7 @@ def write_video(frames, title, path=""):
 
 
 def imagine_ahead(
-    prev_state, prev_belief, policy, transition_model, shield, planning_horizon=12
+    prev_state, prev_belief, policy, transition_model, planning_horizon=12
 ):
     """
     imagine_ahead is the function to draw the imaginary tracjectory using the dynamics model, actor, critic.
@@ -253,7 +253,7 @@ def build_dense_model(
     feature_size: int,
     output_size: int,
     hidden_size: int,
-    layers: int = 4,
+    layers: int = 1,
     activation=nn.ELU,
 ):
     model = [nn.Linear(feature_size, hidden_size)]

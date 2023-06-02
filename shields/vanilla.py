@@ -4,8 +4,8 @@ from agent.models import (
     ActorModel,
     SymbolicObservationModel,
     TransitionModel,
+    AtomicModel,
     ValueModel,
-    APModel,
 )
 import torch
 import torch.nn.functional as F
@@ -31,9 +31,9 @@ class Node:
         self.observation_model = observation_model
 
     def is_terminal(self):
-        violations = self.violation_model(self.belief, self.state).squeeze(0)
-        reach_goal = violations[-1].item()
-
+        reach_goal = (
+            self.violation_model.forward_goal(self.belief, self.state).squeeze().item()
+        )
         return reach_goal > 0.5
 
     def find_random_child(self):
@@ -84,14 +84,18 @@ class Node:
         ]
 
     def reward(self):
-        violations = self.violation_model(self.belief, self.state).squeeze()
-        reach_goal = violations[-1].sum()
-        violations = violations[:-1].sum()
+        violations = self.violation_model.forward_violation(
+            self.belief, self.state
+        ).sum()
+        reach_goal = self.violation_model.forward_goal(self.belief, self.state).sum()
 
         _, entropies = self.actor_model.get_action(self.belief, self.state, det=False)
         entropy = entropies.sum()
 
-        return violations.item(), entropy.item(), reach_goal.item()
+        std = self.observation_model.std(self.belief, self.state)
+        uncertainty = torch.linalg.vector_norm(std)
+
+        return violations.item(), entropy.item(), uncertainty.item(), reach_goal.item()
 
     def __eq__(self, __value: object) -> bool:
         if isinstance(__value, Node):
@@ -101,11 +105,11 @@ class Node:
         return hash((self.belief, self.state))
 
 
-class EntropyMCTSShield(Shield):
+class VanillaShield(Shield):
     def __init__(
         self,
         transition_model: TransitionModel,
-        violation_model: APModel,
+        violation_model: AtomicModel,
         actor_model: ActorModel,
         value_model: ValueModel,
         observation_model: SymbolicObservationModel,
@@ -114,7 +118,7 @@ class EntropyMCTSShield(Shield):
         paths_to_sample=1,
         exploration_weight=1,
         discount=0.5,
-        sensitivity=0.75,
+        sensitivity=0.5,
     ):
         self.transition_model = transition_model
         self.violation_model = violation_model
@@ -172,7 +176,7 @@ class EntropyMCTSShield(Shield):
         weighted_scores = torch.softmax(scores, dim=1)
         weighted_action = torch.softmax(action, dim=1)
 
-        alpha = min(0.5 + math.exp(0.001 * t), 1)
+        alpha = max(math.exp(-0.01 * t), 0.25)
         return (
             1 - self.sensitivity
         ) * weighted_action + self.sensitivity * alpha * weighted_scores, True
@@ -185,12 +189,13 @@ class EntropyMCTSShield(Shield):
         self._backpropagate(path, *attrs)
 
     def _score(self, n):
-        novelty = 2 * math.exp(-0.1 * self.N[n])
+        novelty = math.exp(-0.1 * self.N[n])
+        uncertainty_bonus = 0.1 * self.U[n] / self.N[n]
         safety = -self.V[n] / self.N[n]
         goal_bonus = self.G[n] / self.N[n]
-        # entropy_bonus = math.exp(self.E[n] / self.N[n])
+        entropy_bonus = 0.1 * math.exp(self.E[n] / self.N[n])
         # print(novelty, entropy_bonus, uncertainty_bonus, safety, goal_bonus)
-        return novelty + safety + goal_bonus
+        return novelty + entropy_bonus + uncertainty_bonus + safety + goal_bonus
 
     def _select(self, node):
         path = []
@@ -214,6 +219,7 @@ class EntropyMCTSShield(Shield):
     def _simulate(self, root):
         violations = 0
         entropies = 0
+        uncert = 0
         goal = 0
 
         node = root
@@ -223,8 +229,9 @@ class EntropyMCTSShield(Shield):
         for _ in range(num_sims):
             step = 0
             while step < self.depth:
-                v, e, g = node.reward()
+                v, e, u, g = node.reward()
                 violations += v * self.discount**step
+                uncert += u * self.discount**step
                 entropies += e * self.discount**step
                 goal += g * self.discount**step
 
@@ -237,31 +244,33 @@ class EntropyMCTSShield(Shield):
         return (
             violations / num_sims,
             entropies / num_sims,
+            uncert / num_sims,
             goal / num_sims,
         )
 
-    def _backpropagate(self, path, violation, entropy, goal):
+    def _backpropagate(self, path, violation, entropy, uncert, goal):
         e = entropy
         v = violation
         g = goal
+        u = uncert
 
         for node in reversed(path):
-            nv, ne, ng = node.reward()
+            nv, ne, nu, ng = node.reward()
 
             self.N[node] += 1
             self.V[node] += v
             self.E[node] += e
+            self.U[node] += u
             self.K[node] += v * math.exp(-0.1 * ne)
-            self.G[node] += goal
+            self.G[node] += g
 
             e = (ne + e) * self.discount
             v = (nv + v) * self.discount
             g = (ng + g) * self.discount
+            u = (nu + u) * self.discount
 
     def _explore_select(self, node):
         assert all(n in self.children for n in self.children[node])
-
-        log_N_vertex = math.log(self.N[node])
 
         def score(n):
             base = self._score(n)

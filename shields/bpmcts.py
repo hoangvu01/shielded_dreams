@@ -1,6 +1,6 @@
 import math
 from collections import defaultdict
-from agent.models import ActorModel, TransitionModel, ViolationModel
+from agent.models import ActorModel, TransitionModel, APModel
 import torch
 import torch.nn.functional as F
 from .shield import Shield
@@ -87,7 +87,7 @@ class BoundedPrescienceMCTSShield(Shield):
     def __init__(
         self,
         transition_model: TransitionModel,
-        violation_model: ViolationModel,
+        violation_model: APModel,
         depth=5,
         violation_threshold=1,
         paths_to_sample=1,

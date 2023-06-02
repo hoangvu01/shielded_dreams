@@ -146,7 +146,7 @@ class CrossingMinigrid(gymnasium.Env):
 
 
 if __name__ == "__main__":
-    e = CrossingMinigrid(render_mode="human")
+    e = CrossingMinigrid(render_mode="human", screen_size=400)
     e.reset()
     e.render()
     while True:

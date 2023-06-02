@@ -72,17 +72,20 @@ if not args.test:
         done, t = False, 0
         while not done:
             action = env.sample_random_action()
-            next_observation, reward, done, _, info = env.step(action)
+            next_observation, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
             next_observation = torch.tensor(next_observation, dtype=torch.float32)
 
             violation = info["violation"]
             violation_count += violation.sum()
 
-            D.append(observation.cpu(), action.cpu(), reward, violation, done)
+            D.append(
+                observation.cpu(), action.cpu(), reward, violation, done, terminated
+            )
             observation = next_observation
             t += 1
 
-        metrics["violation_count"].append((s, violation_count))
+        metrics["violation_count"].append(violation_count)
         metrics["steps"].append(
             t * args.action_repeat
             + (0 if len(metrics["steps"]) == 0 else metrics["steps"][-1])
@@ -110,11 +113,13 @@ for episode in (
     for s in (pbar := tqdm(range(args.collect_interval))):
         # Draw sequence chunks {(o_t, a_t, r_t+1, terminal_t+1)} ~ D uniformly at random from the dataset (including terminal flags)
         # Transitions start at time t = 0
-        observations, actions, rewards, violations, nonterminals = D.sample(
+        observations, actions, rewards, violations, nonterminals, goals = D.sample(
             args.batch_size, args.chunk_size
         )
         pbar.set_description(f"Episode {episode} - training models ")
-        loss = agent.train(observations, actions, rewards, violations, nonterminals)
+        loss = agent.train(
+            observations, actions, rewards, violations, nonterminals, goals
+        )
 
         pbar.set_postfix(obs=loss[0], kl=loss[2], actor=loss[3], value=loss[4])
         losses.append(loss)
@@ -155,24 +160,33 @@ for episode in (
             belief, posterior_state, action = agent.policy(
                 belief, posterior_state, action, observation, explore=True
             )
-            
-            shield_action, shield_interfered = shield.step(
-                belief, posterior_state, action, agent.actor_model, episode
-            )
-            dbar.set_postfix(
-                interfered=shield_interfered,
-                a=action.argmax().item(),
-                s=shield_action.argmax().item(),
-            )
-            if episode % args.shield_interval == 0 and shield_interfered:
-                action = shield_action
 
+            if episode % args.shield_interval == 0:
+                shield_action, shield_interfered = shield.step(
+                    belief, posterior_state, action, episode
+                )
+                dbar.set_postfix(
+                    interfered=shield_interfered,
+                    a=action.argmax().item(),
+                    s=shield_action.argmax().item(),
+                )
+                action = shield_action
+            else:
+                dbar.set_postfix(
+                    interfered="off",
+                    a=action.argmax().item(),
+                )
             # Perform environment step (action repeats handled internally)
-            next_observation, reward, done, _, info = sim_env.step(action.cpu())
+            next_observation, reward, terminated, truncated, info = sim_env.step(
+                action.cpu()
+            )
+            done = terminated or truncated
             next_observation = torch.tensor(next_observation, dtype=torch.float32)
             violation = info["violation"]
 
-            D.append(observation.cpu(), action.cpu(), reward, violation, done)
+            D.append(
+                observation.cpu(), action.cpu(), reward, violation, done, terminated
+            )
 
             total_reward += reward
             observation = next_observation
@@ -194,7 +208,7 @@ for episode in (
         metrics["steps"].append(s + metrics["steps"][-1])
         metrics["episodes"].append(episode)
         metrics["train_rewards"].append(total_reward)
-        metrics["violation_count"].append((episode, violations))
+        metrics["violation_count"].append(violations)
 
     # Test
     if episode % args.test_interval == 0:
@@ -230,7 +244,9 @@ for episode in (
                     )
 
                     # Perform environment step (action repeats handled internally)
-                    observation, reward, done, _, info = test_env.step(action.cpu())
+                    observation, reward, terminated, truncated, info = test_env.step(
+                        action.cpu()
+                    )
                     observation = torch.tensor(observation, dtype=torch.float32)
 
                     total_reward += reward
@@ -238,7 +254,7 @@ for episode in (
 
                     if args.render:
                         test_env.render()
-                    if done:
+                    if terminated or truncated:
                         break
                 tqdm.write(
                     "test episode: {}, reward: {}, violations: {}".format(
@@ -257,7 +273,7 @@ for episode in (
         episode=metrics["episodes"][-1],
         steps=metrics["steps"][-1],
         train_rewards=metrics["train_rewards"][-1],
-        violations=metrics["violation_count"][-1][1],
+        violations=metrics["violation_count"][-1],
     )
     # Checkpoint models
     if episode % args.checkpoint_interval == 0:

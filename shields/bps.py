@@ -1,4 +1,4 @@
-from agent.models import TransitionModel, ViolationModel
+from agent.models import TransitionModel, APModel
 import torch
 import torch.nn.functional as F
 
@@ -9,7 +9,7 @@ class BoundedPrescienceShield(Shield):
     def __init__(
         self,
         transition_model: TransitionModel,
-        violation_model: ViolationModel,
+        violation_model: APModel,
         depth=1,
         violation_threshold=1,
         paths_to_sample=1,

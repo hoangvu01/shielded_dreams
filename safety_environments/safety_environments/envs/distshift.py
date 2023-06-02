@@ -145,7 +145,7 @@ class DistShiftMinigrid(gymnasium.Env):
 
 
 if __name__ == "__main__":
-    e = DistShiftMinigrid(render_mode="human", version=2)
+    e = DistShiftMinigrid(render_mode="human", version=2, screen_size=400)
     e.reset()
     e.render()
     while True:

@@ -7,6 +7,7 @@ from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
 
 from agent.models import (
+    ModelGroup,
     bottle,
     Encoder,
     ObservationModel,
@@ -14,11 +15,12 @@ from agent.models import (
     TransitionModel,
     ValueModel,
     ActorModel,
-    ViolationModel,
+    APModel,
 )
 from shields.bpemcts import EntropyMCTSShield
 from shields.bpmcts import BoundedPrescienceMCTSShield
 from shields.bps import BoundedPrescienceShield
+from shields.raisin import RaisinShield
 from utils import (
     imagine_ahead,
     lambda_return,
@@ -79,7 +81,7 @@ class Dreamer:
         )
         self.observation_model.load_state_dict(model_dicts["observation_model"])
         self.reward_model.load_state_dict(model_dicts["reward_model"])
-        self.violation_model.load_state_dict(model_dicts["violation_model"])
+        self.ap_model.load_state_dict(model_dicts["violation_model"])
         self.encoder.load_state_dict(model_dicts["encoder"])
         self.actor_model.load_state_dict(model_dicts["actor_model"])
         self.value_model.load_state_dict(model_dicts["value_model"])
@@ -109,7 +111,7 @@ class Dreamer:
             self._c.hidden_size,
             self._c.dense_activation_function,
         )
-        self.violation_model = ViolationModel(
+        self.ap_model = APModel(
             self._c.belief_size,
             self._c.state_size,
             self._env.violation_size,
@@ -140,12 +142,11 @@ class Dreamer:
             list(self.transition_model.parameters())
             + list(self.observation_model.parameters())
             + list(self.reward_model.parameters())
-            + list(self.violation_model.parameters())
+            + list(self.ap_model.parameters())
             + list(self.encoder.parameters()),
             lr=self._c.model_learning_rate,
             eps=self._c.adam_epsilon,
         )
-        # print(list(self.actor_model.parameters()))
         self.actor_opt = optim.Adam(
             self.actor_model.parameters(),
             lr=self._c.actor_learning_rate,
@@ -163,27 +164,35 @@ class Dreamer:
             + self.encoder.modules
             + self.observation_model.modules
             + self.reward_model.modules
-            + self.violation_model.modules
+            + self.ap_model.modules
         )
 
         self.model_params = (
             list(self.transition_model.parameters())
             + list(self.observation_model.parameters())
             + list(self.reward_model.parameters())
-            + list(self.violation_model.parameters())
+            + list(self.ap_model.parameters())
             + list(self.encoder.parameters())
         )
 
         self.transition_model.apply(weights_init)
-        self.violation_model.apply(weights_init)
+        self.ap_model.apply(weights_init)
         self.actor_model.apply(weights_init)
         self.value_model.apply(weights_init)
+
+        self.models = ModelGroup(
+            self.transition_model,
+            self.observation_model,
+            self.ap_model,
+            self.actor_model,
+            self.value_model,
+        )
 
     def set_eval(self):
         self.transition_model.eval()
         self.reward_model.eval()
         self.observation_model.eval()
-        self.violation_model.eval()
+        self.ap_model.eval()
         self.encoder.eval()
         self.actor_model.eval()
         self.value_model.eval()
@@ -192,7 +201,7 @@ class Dreamer:
         self.transition_model.train()
         self.reward_model.train()
         self.observation_model.train()
-        self.violation_model.train()
+        self.ap_model.train()
         self.encoder.train()
         self.actor_model.train()
         self.value_model.train()
@@ -207,6 +216,10 @@ class Dreamer:
         )
         self._writer.add_scalar(
             "train/step_reward", self._metrics["train_rewards"][-1], s
+        )
+
+        self._writer.add_scalar(
+            "violation_count", self._metrics["violation_count"][-1], s
         )
 
         for metric in [
@@ -226,7 +239,7 @@ class Dreamer:
                 "transition_model": self.transition_model.state_dict(),
                 "observation_model": self.observation_model.state_dict(),
                 "reward_model": self.reward_model.state_dict(),
-                "violation_model": self.violation_model.state_dict(),
+                "violation_model": self.ap_model.state_dict(),
                 "encoder": self.encoder.state_dict(),
                 "actor_model": self.actor_model.state_dict(),
                 "value_model": self.value_model.state_dict(),
@@ -238,10 +251,14 @@ class Dreamer:
         )
 
     def build_shield(self):
-        shield = EntropyMCTSShield(
-            self.transition_model,
-            self.violation_model,
-            self.observation_model,
+        shield = RaisinShield(
+            ModelGroup(
+                self.transition_model,
+                self.observation_model,
+                self.ap_model,
+                self.actor_model,
+                self.value_model,
+            ),
             depth=self._c.planning_horizon,
             violation_threshold=self._c.violation_threshold,
             paths_to_sample=self._c.paths_to_sample,
@@ -249,7 +266,7 @@ class Dreamer:
         )
         return shield
 
-    def train(self, obs, actions, rewards, violations, nonterminals):
+    def train(self, obs, actions, rewards, violations, nonterminals, goals):
         init_belief, init_state = self.build_initial_params(self._c.batch_size)
         embedded_observations = bottle(self.encoder, (obs[1:],))
 
@@ -286,15 +303,19 @@ class Dreamer:
             reduction="none",
         ).mean(dim=(0, 1))
 
-        violation_loss = weighted_bce_loss(
-            violations[:-1].reshape(-1, self._env.violation_size),
+        vios_target = violations[:-1].reshape(-1, self._env.violation_size)
+        goals_target = goals[:-1].reshape(-1, 1)
+        ap_target = torch.cat([vios_target, goals_target], dim=1)
+
+        ap_loss = weighted_bce_loss(
+            ap_target,
             bottle(
-                self.violation_model,
+                self.ap_model,
                 (
                     beliefs,
                     posterior_states,
                 ),
-            ).reshape(-1, self._env.violation_size),
+            ).reshape(-1, self._env.violation_size + 1),
         ).mean()
 
         kl_loss = 0.8 * kl_divergence(
@@ -318,7 +339,7 @@ class Dreamer:
                 Normal(posterior_means, posterior_std_devs), global_prior
             ).sum(dim=2).mean(dim=(0, 1))
 
-        model_loss = observation_loss + reward_loss + kl_loss + violation_loss
+        model_loss = observation_loss + reward_loss + kl_loss + ap_loss
         # Update model parameters
         self.model_opt.zero_grad()
         model_loss.backward()
@@ -335,7 +356,6 @@ class Dreamer:
                 actor_beliefs,
                 self.actor_model,
                 self.transition_model,
-                self.build_shield(),
                 self._c.planning_horizon,
             )
         (
@@ -397,7 +417,7 @@ class Dreamer:
             kl_loss.item(),
             actor_loss.item(),
             value_loss.item(),
-            violation_loss.item(),
+            ap_loss.item(),
         )
 
     def policy(

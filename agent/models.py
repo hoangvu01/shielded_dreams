@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Optional, List
 import torch
 import torchrl
@@ -16,8 +17,7 @@ def bottle(f, x_tuple):
     )
     y_size = y.size()
     output = y.view(x_sizes[0][0], x_sizes[0][1], *y_size[1:])
-    return output
-
+    return output    
 
 class TransitionModel(jit.ScriptModule):
     __constants__ = ["min_std_dev"]
@@ -30,7 +30,7 @@ class TransitionModel(jit.ScriptModule):
         hidden_size,
         embedding_size,
         activation_function="relu",
-        min_std_dev=0.1,
+        min_std_dev=0.01,
     ):
         super().__init__()
         self.act_fn = getattr(F, activation_function)
@@ -181,31 +181,16 @@ class SymbolicObservationModel(jit.ScriptModule):
         self.fc2 = nn.Linear(embedding_size, embedding_size)
         self.fc3 = nn.Linear(embedding_size, embedding_size)
 
-        self.fc = nn.Linear(embedding_size, observation_size * 2)
+        self.fc = nn.Linear(embedding_size, observation_size)
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc]
 
-    def _dist(self, belief, state):
+    def forward(self, belief, state):
         hidden = self.act_fn(self.fc1(torch.cat([belief, state], dim=1)))
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
         y = self.fc(hidden)
 
-        obs_mean, obs_logvar = torch.chunk(y, 2, dim=1)
-        obs_logvar = F.softplus(obs_logvar)
-
-        return obs_mean, obs_logvar
-
-    def forward(self, belief, state):
-        obs_mean, obs_logvar = self._dist(belief, state)
-
-        dist = torch.distributions.Normal(obs_mean, torch.exp(0.5 * obs_logvar))
-        dist = torch.distributions.Independent(dist, 1)
-        observation = dist.rsample()
-        return observation
-
-    def std(self, belief, state):
-        _, obs_logvar = self._dist(belief, state)
-        return torch.exp(0.5 * obs_logvar)
+        return y
 
 
 class VisualObservationModel(jit.ScriptModule):
@@ -271,7 +256,7 @@ class RewardModel(jit.ScriptModule):
         return reward
 
 
-class ViolationModel(jit.ScriptModule):
+class APModel(jit.ScriptModule):
     def __init__(
         self,
         belief_size,
@@ -288,7 +273,9 @@ class ViolationModel(jit.ScriptModule):
         self.fc3 = nn.Linear(hidden_size, hidden_size)
         self.fc4 = nn.Linear(hidden_size, hidden_size)
         self.fc5 = nn.Linear(hidden_size, hidden_size)
-        self.fc6 = nn.Linear(hidden_size, violation_size)
+        self.fc6 = nn.Linear(hidden_size, violation_size + 1)
+
+        self.violation_size = violation_size
         self.modules = [self.fc1, self.fc2, self.fc3, self.fc4, self.fc5, self.fc6]
 
     @jit.script_method
@@ -301,6 +288,14 @@ class ViolationModel(jit.ScriptModule):
         # hidden = self.act_fn(self.fc5(hidden))
         violation = torch.sigmoid(self.fc6(hidden))
         return violation
+
+    def forward_goal(self, belief, state):
+        y = self.forward(belief, state)
+        return y[:, -1]
+
+    def forward_violation(self, belief, state):
+        y = self.forward(belief, state)
+        return y[:, : self.violation_size]
 
 
 class ValueModel(jit.ScriptModule):
@@ -357,8 +352,6 @@ class ActorModel(jit.ScriptModule):
         else:
             raise NotImplementedError("Invalid distribution")
 
-        self._init_std_w = nn.Parameter(torch.ones((1, action_size)))
-
         self._init_std = init_std
         self._dist = dist
         self._min_std = min_std
@@ -372,7 +365,6 @@ class ActorModel(jit.ScriptModule):
             self.fc5,
             self.fc6,
             self.fc_last,
-            self._init_std_w,
         ]
 
     @jit.script_method
@@ -386,7 +378,7 @@ class ActorModel(jit.ScriptModule):
         # hidden = self.act_fn(self.fc6(hidden))
         action = self.fc_last(hidden).squeeze(dim=1)
 
-        raw_init_std = torch.log(torch.exp(self._init_std) - 1) * self._init_std_w
+        raw_init_std = torch.log(torch.exp(self._init_std) - 1)
 
         action_mean, action_std_dev = torch.chunk(action, 2, dim=1)
         action_mean = self._mean_scale * torch.tanh(action_mean / self._mean_scale)
@@ -403,15 +395,13 @@ class ActorModel(jit.ScriptModule):
 
         probs = torch.softmax(actions, dim=1)
         entropies = -torch.sum(probs * probs.log(), dim=1)
-        # print(
-        #     actions,
-        #     action_mean,
-        #     action_std,
-        #     probs,
-        #     entropies,
-        #     self._init_std_w,
-        #     sep="\n",
-        # )
+        print(
+            actions,
+            action_mean,
+            action_std,
+            probs,
+            sep="\n",
+        )
         return actions, entropies
 
 
@@ -463,3 +453,11 @@ class VisualEncoder(jit.ScriptModule):
 
 def Encoder(observation_size, embedding_size, activation_function="relu"):
     return SymbolicEncoder(observation_size, embedding_size, activation_function)
+
+@dataclass
+class ModelGroup:
+    transition_model: TransitionModel
+    observation_model: ObservationModel
+    ap_model: APModel
+    actor_model: ActorModel
+    value_model: ValueModel
