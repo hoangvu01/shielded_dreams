@@ -18,16 +18,16 @@ cnn_activation_function: "relu"
 dense_activation_function: "elu"
 actor_distribution: "tanh_normal"
 embedding_size: 32
-hidden_size: 64
-belief_size: 48
-state_size: 16
+hidden_size: 400
+belief_size: 128
+state_size: 32
 
 global_kl_beta: 0
 free_nats: 5
 
 model_learning_rate: 0.0001
-actor_learning_rate: 0.00001
-value_learning_rate: 0.00001
+actor_learning_rate: 0.0001
+value_learning_rate: 0.0001
 violation_learning_rate: 0.0001
 learning_rate_schedule: 0
 adam_epsilon: 0.000001
@@ -36,10 +36,10 @@ grad_clip_norm: 1.0
 
 # Exploration
 action_repeat: 1
-temperature: 0.00001
+temperature: 0.000001
 
 # General training
-experience_size: 6000
+experience_size: 60000
 episodes: 500
 seed_episodes: 20
 collect_interval: 20
@@ -47,12 +47,12 @@ batch_size: 32
 chunk_size: 16
 
 planning_horizon: 5
-paths_to_sample: 20
-discount: 0.95
-disclam: 0.95
+paths_to_sample: 30
+discount: 0.99
+disclam: 0.9
 
-violation_discount: 0.5
-shield_interval: 3
+violation_discount: 0.8
+shield_interval: 2
 
 checkpoint_interval: 50
 checkpoint_experience: False

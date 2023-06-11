@@ -6,7 +6,7 @@ from safety_environments import MINIGRID_ENVS
 from safety_environments.wrappers import ActionWeights
 
 
-def Env(env, max_episode_steps, action_repeat, bit_depth, render=False):
+def Env(env, max_episode_steps, action_repeat, bit_depth, render=False, test=False):
     assert env in MINIGRID_ENVS
 
     render_mode = "human" if render else None
@@ -16,6 +16,7 @@ def Env(env, max_episode_steps, action_repeat, bit_depth, render=False):
         bit_depth=bit_depth,
         max_episode_steps=max_episode_steps,
         render_mode=render_mode,
+        test=test,
     )
     env = ActionWeights(env)
     env = ImgObsWrapper(env)

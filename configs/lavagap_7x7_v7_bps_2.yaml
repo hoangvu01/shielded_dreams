@@ -1,9 +1,9 @@
 algo: "dreamer"
-id: "v1"
+id: "v7-bps-epsilon-15"
 seed: 0
 disable_cuda: False
 
-env: "DistShift1-Relaxed"
+env: "LavaGapS7-Relaxed"
 env-seed: 0
 max_episode_length: 50
 
@@ -17,17 +17,17 @@ max_episode_length: 50
 cnn_activation_function: "relu"
 dense_activation_function: "elu"
 actor_distribution: "tanh_normal"
-embedding_size: 24
-hidden_size: 64
-belief_size: 32
-state_size: 32
+embedding_size: 32
+hidden_size: 128
+belief_size: 64
+state_size: 16
 
 global_kl_beta: 0
 free_nats: 5
 
 model_learning_rate: 0.0001
-actor_learning_rate: 0.0001
-value_learning_rate: 0.0001
+actor_learning_rate: 0.00001
+value_learning_rate: 0.00001
 violation_learning_rate: 0.0001
 learning_rate_schedule: 0
 adam_epsilon: 0.000001
@@ -36,34 +36,29 @@ grad_clip_norm: 1.0
 
 # Exploration
 action_repeat: 1
-action_noise: 2
-action_noise_decay: 0.99995
-action_noise_min: 0.25
 temperature: 0.00001
 
 # General training
-experience_size: 1000
+experience_size: 6000
 episodes: 500
 seed_episodes: 20
-collect_interval: 25
-batch_size: 64
-chunk_size: 25
+collect_interval: 20
+batch_size: 32
+chunk_size: 16
 
 planning_horizon: 5
-paths_to_sample: 15
+paths_to_sample: 20
 discount: 0.95
 disclam: 0.95
 
-violation_threshold: -5
-violation_interval: 25
-violation_diff: 0.25
-violation_min: -2
-violation_discount: 0.9
+violation_threshold: 30
+violation_discount: 0.5
+shield_interval: 3
+
 checkpoint_interval: 50
 checkpoint_experience: False
 models: ""
 experience_replay: ""
-
 
 render: False
 test: False

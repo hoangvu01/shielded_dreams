@@ -20,6 +20,7 @@ class LavaGapMinigrid(gymnasium.Env):
         screen_size=300,
         grid_size=5,
         lava_death=False,
+        test=False,
     ):
         super().__init__()
 
@@ -57,6 +58,7 @@ class LavaGapMinigrid(gymnasium.Env):
         self.max_episode_steps = max_episode_steps
 
         self.prev_step = []
+        self.test = test
 
     def reset(self, seed=None, options=None):
         self._t = 0
@@ -83,7 +85,7 @@ class LavaGapMinigrid(gymnasium.Env):
         terminated, hit_wall, hit_lava, idle = False, False, False, False
         if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
             self.lava_hits += 1
-            reward = -0.1
+            reward -= 0.1
             hit_lava = True
 
         self.prev_step.append(action)
@@ -94,7 +96,7 @@ class LavaGapMinigrid(gymnasium.Env):
         if action == 2:
             if isinstance(fwd_cell, Wall):
                 hit_wall = True
-                reward = -0.1
+                reward -= 0.1
                 self.wall_hits += 1
 
             # Replaces current position with object
@@ -111,9 +113,11 @@ class LavaGapMinigrid(gymnasium.Env):
         obs["image"] = flattened_obs
 
         info["violation"] = np.array(
-            [hit_wall, hit_lava, idle], dtype=np.int32
+            [hit_wall, hit_lava], dtype=np.int32
         ).reshape(1, -1)
 
+        if self.test: 
+            reward = env_reward
         return obs, reward, terminated, truncated, info
 
     def render(self):
@@ -132,11 +136,11 @@ class LavaGapMinigrid(gymnasium.Env):
 
     @property
     def violation_size(self):
-        return 3
+        return 2
 
     @property
     def violation_keys(self):
-        return ["hit_wall", "hit_lava", "idle"]
+        return ["hit_wall", "hit_lava"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):

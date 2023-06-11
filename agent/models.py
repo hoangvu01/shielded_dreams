@@ -395,13 +395,13 @@ class ActorModel(jit.ScriptModule):
 
         probs = torch.softmax(actions, dim=1)
         entropies = -torch.sum(probs * probs.log(), dim=1)
-        print(
-            actions,
-            action_mean,
-            action_std,
-            probs,
-            sep="\n",
-        )
+        # print(
+        #     actions,
+        #     action_mean,
+        #     action_std,
+        #     probs,
+        #     sep="\n",
+        # )
         return actions, entropies
 
 
@@ -457,6 +457,7 @@ def Encoder(observation_size, embedding_size, activation_function="relu"):
 @dataclass
 class ModelGroup:
     transition_model: TransitionModel
+    reward_model: RewardModel
     observation_model: ObservationModel
     ap_model: APModel
     actor_model: ActorModel

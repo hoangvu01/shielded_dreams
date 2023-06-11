@@ -182,6 +182,7 @@ class Dreamer:
 
         self.models = ModelGroup(
             self.transition_model,
+            self.reward_model,
             self.observation_model,
             self.ap_model,
             self.actor_model,
@@ -219,7 +220,11 @@ class Dreamer:
         )
 
         self._writer.add_scalar(
-            "violation_count", self._metrics["violation_count"][-1], s
+            "violation_count/episodes", self._metrics["violation_count"][-1], self._metrics["episodes"][-1]
+        )
+        
+        self._writer.add_scalar(
+            "violation_count/steps", self._metrics["violation_count"][-1], s
         )
 
         for metric in [
@@ -254,6 +259,7 @@ class Dreamer:
         shield = RaisinShield(
             ModelGroup(
                 self.transition_model,
+                self.reward_model,
                 self.observation_model,
                 self.ap_model,
                 self.actor_model,

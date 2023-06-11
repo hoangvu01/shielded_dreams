@@ -10,6 +10,9 @@ from config import parser
 from dreamer import Dreamer
 from environments.env import Env
 
+from torch.utils.tensorboard import SummaryWriter
+
+
 # Hyper parameters
 args = parser.parse_args()
 
@@ -35,6 +38,8 @@ torch.set_default_device(args.device)
 torch.set_default_dtype(torch.float32)
 
 metrics = defaultdict(list)
+summary_name = results_dir + "/{}_{}_test_log"
+writer = SummaryWriter(summary_name.format(args.env, args.id))
 
 # Initialise training environment and experience replay memory
 env = Env(
@@ -43,6 +48,7 @@ env = Env(
     args.action_repeat,
     args.bit_depth,
     args.render,
+    # test=True,
 )
 
 # Initialise model parameters randomly
@@ -73,38 +79,26 @@ with torch.no_grad():
                 belief, posterior_state, action, observation, explore=True
             )
 
-            # shield_action, shield_interfered = shield.step(
-            #     belief,
-            #     posterior_state,
-            #     action,
-            #     agent.actor_model,
-            #     300
-            # )
-            # action = shield_action
-
-            # Perform environment step (action repeats handled internally)
-            # pbar.set_postfix(
-            #     r=total_reward,
-            #     v=total_violations,
-            #     interfered=shield_interfered,
-            #     action=action.argmax().item(),
-            #     shield=shield_action.argmax().item(),
-            # )
             input("Continue")
             observation, reward, done, _, info = env.step(action.cpu())
             observation = torch.tensor(observation, dtype=torch.float32)
 
-            violation = info["violation"]
+            violation = info["violation"].squeeze()
 
             total_reward += reward
-            total_violations += violation.sum()
+            total_violations += violation[:-1].sum()
+
             if args.render:
                 env.render()
 
             if done:
                 break
+
         rewards.append(total_reward)
         violations.append(total_violations)
+
+        writer.add_scalar("test/episode_reward", total_reward, t)
+        writer.add_scalar("violation_count/episodes", total_violations, t)
 
     pbar.close()
 

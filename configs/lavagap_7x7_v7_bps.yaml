@@ -1,5 +1,5 @@
 algo: "dreamer"
-id: "multi-violations-v8"
+id: "v7-bps-epsilon-3"
 seed: 0
 disable_cuda: False
 
@@ -51,6 +51,7 @@ paths_to_sample: 20
 discount: 0.95
 disclam: 0.95
 
+violation_threshold: 3
 violation_discount: 0.5
 shield_interval: 3
 

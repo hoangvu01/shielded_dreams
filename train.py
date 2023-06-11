@@ -46,6 +46,9 @@ metrics = defaultdict(list)
 summary_name = results_dir + "/{}_{}_log"
 writer = SummaryWriter(summary_name.format(args.env, args.id))
 
+def acc_violation(violations):
+    return violations.squeeze()[:-1].sum()
+
 # Initialise training environment and experience replay memory
 env = Env(
     args.env,
@@ -77,7 +80,7 @@ if not args.test:
             next_observation = torch.tensor(next_observation, dtype=torch.float32)
 
             violation = info["violation"]
-            violation_count += violation.sum()
+            violation_count += acc_violation(violation)
 
             D.append(
                 observation.cpu(), action.cpu(), reward, violation, done, terminated
@@ -191,7 +194,7 @@ for episode in (
             total_reward += reward
             observation = next_observation
 
-            violations += violation.sum()
+            violations += acc_violation(violation)
             if args.render:
                 sim_env.render()
             if done:
@@ -221,6 +224,7 @@ for episode in (
             args.action_repeat,
             args.bit_depth,
             args.render,
+            test=True,
         )
 
         with torch.no_grad():

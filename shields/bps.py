@@ -1,4 +1,4 @@
-from agent.models import TransitionModel, APModel
+from agent.models import ModelGroup, TransitionModel, APModel
 import torch
 import torch.nn.functional as F
 
@@ -8,76 +8,69 @@ from .shield import Shield
 class BoundedPrescienceShield(Shield):
     def __init__(
         self,
-        transition_model: TransitionModel,
-        violation_model: APModel,
-        depth=1,
-        violation_threshold=1,
-        paths_to_sample=1,
+        models: ModelGroup,
+        depth=5,
+        violation_threshold=3,
+        paths_to_sample=20,
+        exploration_weight=5,
+        discount=0.5,
+        sensitivity=2,
     ):
-        self.transition_model = transition_model
-        self.violation_model = violation_model
+        self.transition_model = models.transition_model
+        self.ap_model = models.ap_model
+        self.actor_model = models.actor_model
+        self.value_model = models.value_model
+        self.observation_model = models.observation_model
+        self.models = models
+
         self.depth = depth
         self.violation_threshold = violation_threshold
         self.paths_to_sample = paths_to_sample
 
-    def step(self, belief, state, actions, policy):
+    def step(self, belief, state, actions, t):
         action_size = actions.size(1)
-        action = actions.argmax()
 
-        all_actions = F.one_hot(torch.arange(0, action_size), num_classes=action_size)
-        beliefs, states, _, _ = zip(
-            *[
-                self.transition_model(state, all_actions[a].reshape(1, 1, -1), belief)
-                for a in range(action_size)
-            ]
-        )
+        all_actions = F.one_hot(
+            torch.arange(0, action_size), num_classes=action_size
+        ).reshape(action_size, 1, action_size)
 
-        violations = torch.tensor(
-            [
-                self._simulate_n(
-                    beliefs[a].squeeze(0),
-                    states[a].squeeze(0),
-                    policy,
-                    self.paths_to_sample,
-                )
-                for a in range(action_size)
-            ]
-        )
+        beliefs, states, _, _ = self.transition_model(state, all_actions, belief)
 
-        # Acceptable number of violations
-        shield_interfered = violations[action].item() >= self.violation_threshold
+        safes = []
+        beliefs, states = (beliefs.squeeze(0), states.squeeze(0))
+        for a in range(action_size):
+            belief, state = beliefs[a], states[a]
+            safes.append(self._is_safe(belief, state, self.paths_to_sample))
 
-        violations = violations.unsqueeze(0)
-        if torch.all(violations > self.violation_threshold):
-            return 1 / (violations + 1), shield_interfered
+        if not any(safes):
+            return actions, False
 
-        return violations * (violations < self.violation_threshold), shield_interfered
+        safes = torch.tensor(safes, dtype=torch.bool).unsqueeze(0)
+        mask = torch.full_like(actions, actions.min() - 1)
+        
+        return torch.where(safes, actions, mask), True
 
     def _is_terminal(self, belief, state):
-        violations = self.violation_model(belief, state)
-        reach_goal = violations[-1]
-
+        reach_goal = self.ap_model.forward_goal(belief, state)
         return torch.all(reach_goal > 0.5).item()
 
-    def _simulate_n(self, belief, state, policy, n):
-        _, vios = zip(*[self._simulate(belief, state, policy) for _ in range(n)])
-        violations_per_traj = [sum(vj) for vj in vios]
-        return max(violations_per_traj)
+    def _is_safe(self, belief, state, n):
+        traj_violations = [self._simulate(belief, state) for _ in range(n)]
+        num_safe = [int(v == 0) for v in traj_violations]
+        return sum(num_safe) >= self.violation_threshold
 
-    def _simulate(self, belief, state, policy):
+    def _simulate(self, belief, state):
         traj = [(belief, state)]
-        initial_violation = self.violation_model(belief, state).squeeze()[:-1]
+        initial_violation = self.ap_model.forward_violation(belief, state).squeeze()
         violations = [(initial_violation > 0.5).sum().item()]
 
         cur_depth = 1
-        num_backtrack = 0
         while cur_depth < self.depth and not self._is_terminal(*traj[-1]):
             cur_depth += 1
             cur_belief, cur_state = traj[-1]
 
-            action, _ = policy.get_action(cur_belief, cur_state, det=False)
+            action, _ = self.actor_model.get_action(cur_belief, cur_state, det=False)
             action = F.one_hot(torch.argmax(action, dim=1), num_classes=action.size(1))
-            # print(cur_belief, cur_state, action)
 
             next_belief, next_state, _, _ = self.transition_model(
                 cur_state, action.unsqueeze(0), cur_belief
@@ -85,12 +78,10 @@ class BoundedPrescienceShield(Shield):
             next_belief = next_belief.squeeze(0)
             next_state = next_state.squeeze(0)
 
-            violation = self.violation_model(next_belief, next_state).squeeze()[:-1]
-            if torch.all(violation < 0.5) or num_backtrack > 5:
-                traj.append((next_belief, next_state))
-                violations.append((violation > 0.5).sum().item())
-                num_backtrack = 0
-            else:
-                num_backtrack += 1
+            violation = self.ap_model.forward_violation(
+                next_belief, next_state
+            ).squeeze()
+            traj.append((next_belief, next_state))
+            violations.append((violation > 0.5).sum().item())
 
-        return traj[:-1], violations
+        return sum(violations)

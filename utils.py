@@ -253,7 +253,7 @@ def build_dense_model(
     feature_size: int,
     output_size: int,
     hidden_size: int,
-    layers: int = 1,
+    layers: int = 2,
     activation=nn.ELU,
 ):
     model = [nn.Linear(feature_size, hidden_size)]

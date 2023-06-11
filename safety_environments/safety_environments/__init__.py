@@ -21,6 +21,7 @@ gymnasium.register(
     kwargs={
         "grid_size": 5,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -30,6 +31,7 @@ gymnasium.register(
     kwargs={
         "grid_size": 5,
         "lava_death": True,
+        "test": False,
     },
 )
 
@@ -39,6 +41,7 @@ gymnasium.register(
     kwargs={
         "grid_size": 7,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -48,6 +51,7 @@ gymnasium.register(
     kwargs={
         "grid_size": 7,
         "lava_death": True,
+        "test": False,
     },
 )
 
@@ -57,6 +61,7 @@ gymnasium.register(
     kwargs={
         "version": 1,
         "lava_death": True,
+        "test": False,
     },
 )
 
@@ -66,6 +71,7 @@ gymnasium.register(
     kwargs={
         "version": 1,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -75,6 +81,7 @@ gymnasium.register(
     kwargs={
         "version": 2,
         "lava_death": True,
+        "test": False,
     },
 )
 
@@ -84,6 +91,7 @@ gymnasium.register(
     kwargs={
         "version": 2,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -94,6 +102,7 @@ gymnasium.register(
         "grid_size": 9,
         "num_crossing": 1,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -104,6 +113,7 @@ gymnasium.register(
         "grid_size": 9,
         "num_crossing": 2,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -114,6 +124,7 @@ gymnasium.register(
         "grid_size": 9,
         "num_crossing": 3,
         "lava_death": False,
+        "test": False,
     },
 )
 
@@ -124,5 +135,6 @@ gymnasium.register(
         "grid_size": 11,
         "num_crossing": 6,
         "lava_death": False,
+        "test": False,
     },
 )
