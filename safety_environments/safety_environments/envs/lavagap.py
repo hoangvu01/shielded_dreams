@@ -113,7 +113,7 @@ class LavaGapMinigrid(gymnasium.Env):
         obs["image"] = flattened_obs
 
         info["violation"] = np.array(
-            [hit_wall, hit_lava], dtype=np.int32
+            [hit_wall, hit_lava, idle], dtype=np.int32
         ).reshape(1, -1)
 
         if self.test: 
@@ -136,11 +136,11 @@ class LavaGapMinigrid(gymnasium.Env):
 
     @property
     def violation_size(self):
-        return 2
+        return 3
 
     @property
     def violation_keys(self):
-        return ["hit_wall", "hit_lava"]
+        return ["hit_wall", "hit_lava", "idle"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):

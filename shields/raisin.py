@@ -33,8 +33,8 @@ class Node:
         self.models = models
 
         self.expanded = False
-        self.children = []
-        self.children_uncertainty = []
+        self.children = [None] * action_size
+        self.children_uncertainty = [None] * action_size
 
         self.N_sa = torch.zeros(1, action_size)
         self.Q_sa = torch.zeros(1, action_size)
@@ -44,8 +44,7 @@ class Node:
         self.N_sa[0, a] += 1
 
     def update_action(self, a, value, violation, uncertainty, reward):
-        # print(a, value, violation, uncertainty)
-        self.Q_sa[0, a] += violation + reward
+        self.Q_sa[0, a] += reward - violation
         self.uncertainty[0, a] += uncertainty
 
     def is_terminal(self):
@@ -58,7 +57,7 @@ class Node:
         p_sa, _ = self.actor_model.get_action(self.belief, self.state)
         p_sa = torch.softmax(p_sa, dim=1)
 
-        if len(self.children) == 0:
+        if not all(self.children):
             v_sa = torch.zeros_like(p_sa)
         else:
             v_sa = torch.tensor([n.value() for n in self.children]).reshape(1, -1)
@@ -71,8 +70,12 @@ class Node:
 
         puct = q_sa + u_sa
 
-        actions = puct
-        action = F.one_hot(actions.argmax(), num_classes=actions.size(1))
+        action = F.one_hot(puct.argmax(), num_classes=puct.size(1))
+        move = puct.argmax().item()
+
+        if self.children[move]:
+            return action, self.children_uncertainty[move], self.children[move]
+
         belief, state, _, _ = self.transition_model(
             self.state, action.reshape(1, 1, -1), self.belief
         )
@@ -82,9 +85,13 @@ class Node:
 
         return (
             action,
-            action_std[actions.argmax()].item(),
+            action_std[puct.argmax()].item(),
             Node(belief.squeeze(0), state.squeeze(0), self.models),
         )
+
+    def add_child(self, a, n, std):
+        self.children[a] = n
+        self.children_uncertainty[a] = std
 
     def expand(self):
         if self.expanded:
@@ -111,8 +118,8 @@ class Node:
         )
         for a in range(action_size):
             belief, state, std = beliefs[a], states[a], stds[a]
-            self.children.append(Node(belief, state, self.models))
-            self.children_uncertainty.append(std.item())
+            self.children[a] = Node(belief, state, self.models)
+            self.children_uncertainty[a] = std.item()
 
     def value(self):
         return self.value_model(self.belief, self.state).sum().item()
@@ -131,7 +138,7 @@ class RaisinShield(Shield):
         depth=5,
         violation_threshold=1,
         paths_to_sample=1,
-        exploration_weight=3,
+        exploration_weight=1,
         discount=0.5,
         sensitivity=3,
     ):
@@ -169,6 +176,9 @@ class RaisinShield(Shield):
             self.do_rollout(node)
 
         action, _, _ = node.find_random_child(sensitivity=self.sensitivity)
+        path = self._select(node)
+        # for n, _, a in path:
+        #     print(a, n.Q_sa, n.N_sa)
         return action.unsqueeze(0), False
 
     def do_rollout(self, node):
@@ -192,8 +202,9 @@ class RaisinShield(Shield):
             )
             action = action.argmax().item()
             node.increment_action(action)
-            path.append((node, std, action))
+            node.add_child(action, child, std)
 
+            path.append((node, std, action))
             node = child
         return path
 

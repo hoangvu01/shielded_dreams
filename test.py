@@ -65,7 +65,7 @@ with torch.no_grad():
     for t in (pbar := tqdm(range(0, args.test_episodes))):
         total_reward, total_violations = 0, 0
 
-        observation, _ = env.reset()
+        observation, _ = env.reset(seed=0)
         observation = torch.tensor(observation, dtype=torch.float32)
 
         violation = torch.zeros((1, env.violation_size))
@@ -78,6 +78,10 @@ with torch.no_grad():
             belief, posterior_state, action = agent.policy(
                 belief, posterior_state, action, observation, explore=True
             )
+            shield_action, shield_interfered = shield.step(
+                belief, posterior_state, action, 500
+            )
+            action = shield_action
 
             input("Continue")
             observation, reward, done, _, info = env.step(action.cpu())
@@ -86,7 +90,7 @@ with torch.no_grad():
             violation = info["violation"].squeeze()
 
             total_reward += reward
-            total_violations += violation[:-1].sum()
+            total_violations += violation.sum()
 
             if args.render:
                 env.render()
