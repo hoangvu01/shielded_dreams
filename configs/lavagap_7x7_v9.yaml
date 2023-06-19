@@ -1,5 +1,5 @@
 algo: "dreamer"
-id: "multi-violations-v7"
+id: "multi-violations-v9"
 seed: 0
 disable_cuda: False
 
@@ -46,12 +46,12 @@ collect_interval: 20
 batch_size: 32
 chunk_size: 16
 
-planning_horizon: 5
+planning_horizon: 16
 paths_to_sample: 20
 discount: 0.95
 disclam: 0.95
 
-violation_discount: 0.5
+violation_discount: 0.9
 shield_interval: 3
 
 checkpoint_interval: 50

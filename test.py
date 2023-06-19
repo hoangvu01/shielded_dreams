@@ -65,7 +65,7 @@ with torch.no_grad():
     for t in (pbar := tqdm(range(0, args.test_episodes))):
         total_reward, total_violations = 0, 0
 
-        observation, _ = env.reset(seed=0)
+        observation, _ = env.reset()
         observation = torch.tensor(observation, dtype=torch.float32)
 
         violation = torch.zeros((1, env.violation_size))
@@ -83,7 +83,11 @@ with torch.no_grad():
             )
             action = shield_action
 
-            input("Continue")
+            i = int(input("Continue: "))
+            if 0 <= i and i <= 2:
+                action = torch.zeros_like(action)
+                action[0, i] = 1 
+                
             observation, reward, done, _, info = env.step(action.cpu())
             observation = torch.tensor(observation, dtype=torch.float32)
 

@@ -176,9 +176,11 @@ class RaisinShield(Shield):
             self.do_rollout(node)
 
         action, _, _ = node.find_random_child(sensitivity=self.sensitivity)
-        path = self._select(node)
+        # path = self._select(node)
         # for n, _, a in path:
         #     print(a, n.Q_sa, n.N_sa)
+            
+        # print(node.Q_sa / node.N_sa, node.N_sa)
         return action.unsqueeze(0), False
 
     def do_rollout(self, node):

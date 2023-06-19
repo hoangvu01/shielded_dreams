@@ -21,6 +21,7 @@ class CrossingMinigrid(gymnasium.Env):
         grid_size=9,
         num_crossing=3,
         lava_death=False,
+        test=False,
     ):
         super().__init__()
 
@@ -58,7 +59,8 @@ class CrossingMinigrid(gymnasium.Env):
         self.max_episode_steps = max_episode_steps
 
         self.prev_step = []
-
+        self.test = test
+ 
     def reset(self, seed=None, options=None):
         self._t = 0
         self.wall_hits = 0
@@ -74,17 +76,17 @@ class CrossingMinigrid(gymnasium.Env):
         cur_cell = self._env.grid.get(*self._env.agent_pos)
         fwd_cell = self._env.grid.get(*self._env.front_pos)
 
-        obs, env_reward, terminated, truncated, info = self._env.step(action)
+        obs, env_reward, _, truncated, info = self._env.step(action)
         partial_obs = self._env_partial.observation(obs)
 
         x, y = self._env_partial.agent_pos
         rx, ry = self._env.relative_coords(x, y)
 
         reward = 0
-        done, hit_wall, hit_lava, idle, reach_goal = False, False, False, False, False
+        terminated, hit_wall, hit_lava, idle = False, False, False, False
         if isinstance(self._env.grid.get(*self._env.agent_pos), Lava):
             self.lava_hits += 1
-            reward = -0.1
+            reward -= 0.1
             hit_lava = True
 
         self.prev_step.append(action)
@@ -95,6 +97,7 @@ class CrossingMinigrid(gymnasium.Env):
         if action == 2:
             if isinstance(fwd_cell, Wall):
                 hit_wall = True
+                reward -= 0.1
                 self.wall_hits += 1
 
             # Replaces current position with object
@@ -102,8 +105,7 @@ class CrossingMinigrid(gymnasium.Env):
                 partial_obs[rx, ry] = fwd_cell.encode()[0]
 
             if isinstance(fwd_cell, Goal):
-                reach_goal = True
-                done = True
+                terminated = True
                 reward = 1
         elif cur_cell is not None:
             partial_obs[rx, ry] = cur_cell.encode()[0]
@@ -112,10 +114,12 @@ class CrossingMinigrid(gymnasium.Env):
         obs["image"] = flattened_obs
 
         info["violation"] = np.array(
-            [hit_wall, hit_lava, idle, reach_goal], dtype=np.int32
+            [hit_wall, hit_lava, idle], dtype=np.int32
         ).reshape(1, -1)
 
-        return obs, reward, done, False, info
+        if self.test: 
+            reward = env_reward
+        return obs, reward, terminated, truncated, info
 
     def render(self):
         self._env.render()
@@ -133,11 +137,11 @@ class CrossingMinigrid(gymnasium.Env):
 
     @property
     def violation_size(self):
-        return 4
+        return 3
 
     @property
     def violation_keys(self):
-        return ["hit_wall", "hit_lava", "idle", "reach_goal"]
+        return ["hit_wall", "hit_lava", "idle"]
 
     # Sample an action randomly from a uniform distribution over all valid actions
     def sample_random_action(self):
