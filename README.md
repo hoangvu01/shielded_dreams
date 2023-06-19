@@ -1,12 +1,19 @@
-BASED ON https://github.com/yusukeurakami/dreamer-pytorch and https://github.com/ajlangley/cpo-pytorch
+BASED ON `https://gitlab.com/chlohe/shielded-dreams`.
 
-To run the experiments, run main.py. The default is GridWorld with ABPS.
+First, to install the environments used for this experiment:
+```
+cd safety_environments
+pip install -e safety_environments
+```
 
-To run the other experiments, you will need to switch out the shield imports. The same goes for other 
-E.g. to use a classical shield, you'll need to import the GridWorldShield class and its associated ShieldBatcher.
+To start the training, run
+```
+python train.py --path <path_to_config>
+```
 
-You can use the --symbolic-env flag to run on the symbolic environment (but don't forget to update the hyperparameters accordingly!)
+To test, run
+```
+python test.py --path <path_to_config> --models <path_to_model>
+```
 
-CPO experiments can be found in the cpo-pytorch folder.
-
-TODO: Tidy up
+Some visualisations are stored in `viz.ipynb`.
