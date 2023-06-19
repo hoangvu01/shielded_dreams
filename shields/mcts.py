@@ -131,7 +131,7 @@ class Node:
         return self.reward_model(self.belief, self.state).sum().item()
 
 
-class RaisinShield(Shield):
+class MCTSShield(Shield):
     def __init__(
         self,
         models: ModelGroup,
@@ -179,7 +179,7 @@ class RaisinShield(Shield):
         # path = self._select(node)
         # for n, _, a in path:
         #     print(a, n.Q_sa, n.N_sa)
-            
+
         # print(node.Q_sa / node.N_sa, node.N_sa)
         return action.unsqueeze(0), False
 

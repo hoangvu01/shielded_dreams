@@ -17,10 +17,8 @@ from agent.models import (
     ActorModel,
     APModel,
 )
-from shields.bpemcts import EntropyMCTSShield
-from shields.bpmcts import BoundedPrescienceMCTSShield
 from shields.bps import BoundedPrescienceShield
-from shields.raisin import RaisinShield
+from shields.mcts import MCTSShield
 from utils import (
     imagine_ahead,
     lambda_return,
@@ -220,9 +218,11 @@ class Dreamer:
         )
 
         self._writer.add_scalar(
-            "violation_count/episodes", self._metrics["violation_count"][-1], self._metrics["episodes"][-1]
+            "violation_count/episodes",
+            self._metrics["violation_count"][-1],
+            self._metrics["episodes"][-1],
         )
-        
+
         self._writer.add_scalar(
             "violation_count/steps", self._metrics["violation_count"][-1], s
         )
@@ -256,7 +256,7 @@ class Dreamer:
         )
 
     def build_shield(self):
-        shield = RaisinShield(
+        shield = MCTSShield(
             ModelGroup(
                 self.transition_model,
                 self.reward_model,
