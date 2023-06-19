@@ -48,7 +48,7 @@ env = Env(
     args.action_repeat,
     args.bit_depth,
     args.render,
-    # test=True,
+    test=True,
 )
 
 # Initialise model parameters randomly
@@ -83,11 +83,6 @@ with torch.no_grad():
             )
             action = shield_action
 
-            i = int(input("Continue: "))
-            if 0 <= i and i <= 2:
-                action = torch.zeros_like(action)
-                action[0, i] = 1 
-                
             observation, reward, done, _, info = env.step(action.cpu())
             observation = torch.tensor(observation, dtype=torch.float32)
 
